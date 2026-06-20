@@ -76,7 +76,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10.12.3
+          version: 9.15.9
           run_install: false
 
       - name: Get pnpm store directory
@@ -93,6 +93,37 @@ jobs:
 
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
+
+      - name: Detect Apple signing availability
+        id: apple-signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${APPLE_CERTIFICATE:-}" ] || missing+=("APPLE_CERTIFICATE")
+          [ -n "${APPLE_CERTIFICATE_PASSWORD:-}" ] || missing+=("APPLE_CERTIFICATE_PASSWORD")
+          [ -n "${APPLE_ID:-}" ] || missing+=("APPLE_ID")
+          [ -n "${APPLE_PASSWORD:-}" ] || missing+=("APPLE_PASSWORD")
+          [ -n "${APPLE_TEAM_ID:-}" ] || missing+=("APPLE_TEAM_ID")
+          [ -n "${KEYCHAIN_PASSWORD:-}" ] || missing+=("KEYCHAIN_PASSWORD")
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "APPLE_SIGNING_AVAILABLE=true" >> "$GITHUB_ENV"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Apple signing secrets are configured."
+          else
+            echo "APPLE_SIGNING_AVAILABLE=false" >> "$GITHUB_ENV"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Apple signing secrets are incomplete; unsigned macOS assets will be built."
+            printf 'Missing: %s\n' "${missing[*]}"
+          fi
 
       - name: Prepare Tauri signing key
         shell: bash
@@ -151,7 +182,7 @@ jobs:
           echo "✅ Tauri signing key prepared"
 
       - name: Import Apple signing certificate
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.apple-signing.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -203,6 +234,12 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          if [ "${APPLE_SIGNING_AVAILABLE:-false}" != "true" ]; then
+            echo "Apple signing secrets are not configured; building unsigned macOS artifacts."
+            pnpm tauri build --target universal-apple-darwin
+            exit 0
+          fi
+
           max_attempts=3
           for attempt in $(seq 1 "$max_attempts"); do
             echo "=== macOS build/notarization attempt ${attempt}/${max_attempts} ==="
@@ -259,53 +296,68 @@ jobs:
             exit 1
           fi
 
-          # Staple notarization ticket to .app (Tauri already notarized it)
-          xcrun stapler staple "$APP_PATH"
-          echo "✅ .app stapled"
+          if [ "${APPLE_SIGNING_AVAILABLE:-false}" = "true" ]; then
+            # Staple notarization ticket to .app (Tauri already notarized it)
+            xcrun stapler staple "$APP_PATH"
+            echo "✅ .app stapled"
+          else
+            echo "Apple signing secrets are not configured; skipping .app stapling."
+          fi
 
           # 1) Collect .tar.gz (updater artifact)
-          NEW_TAR_GZ="CC-Switch-${VERSION}-macOS.tar.gz"
+          NEW_TAR_GZ="CCC-Switch-${VERSION}-macOS.tar.gz"
           cp "$TAR_GZ" "release-assets/$NEW_TAR_GZ"
           [ -f "$TAR_GZ.sig" ] && cp "$TAR_GZ.sig" "release-assets/$NEW_TAR_GZ.sig" || echo ".sig for macOS not found yet"
           echo "macOS updater artifact copied: $NEW_TAR_GZ"
 
           # 2) Collect .app as zip
-          NEW_ZIP="CC-Switch-${VERSION}-macOS.zip"
+          NEW_ZIP="CCC-Switch-${VERSION}-macOS.zip"
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "release-assets/$NEW_ZIP"
           echo "macOS zip ready: $NEW_ZIP"
 
-          # 3) Create styled DMG with create-dmg (Tauri's built-in DMG styling doesn't work on CI)
-          if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            echo "❌ APPLE_SIGNING_IDENTITY is missing before DMG creation" >&2
-            exit 1
+          # 3) Create or collect DMG. Signed builds get the styled DMG; unsigned builds
+          # fall back to Tauri's generated DMG when present.
+          NEW_DMG="CCC-Switch-${VERSION}-macOS.dmg"
+          if [ "${APPLE_SIGNING_AVAILABLE:-false}" = "true" ]; then
+            if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+              echo "❌ APPLE_SIGNING_IDENTITY is missing before DMG creation" >&2
+              exit 1
+            fi
+
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install create-dmg
+            DMG_STAGE_DIR="$RUNNER_TEMP/dmg-stage"
+            rm -rf "$DMG_STAGE_DIR"
+            mkdir -p "$DMG_STAGE_DIR"
+            ditto "$APP_PATH" "$DMG_STAGE_DIR/CCC Switch.app"
+
+            create-dmg \
+              --volname "CCC Switch" \
+              --background "src-tauri/icons/dmg-background.png" \
+              --window-size 660 400 \
+              --window-pos 200 120 \
+              --icon-size 80 \
+              --icon "CCC Switch.app" 180 220 \
+              --hide-extension "CCC Switch.app" \
+              --app-drop-link 480 220 \
+              --codesign "$APPLE_SIGNING_IDENTITY" \
+              --no-internet-enable \
+              "release-assets/$NEW_DMG" \
+              "$DMG_STAGE_DIR"
+
+            rm -rf "$DMG_STAGE_DIR"
+            echo "✅ Styled DMG created: $NEW_DMG"
+          else
+            BUILT_DMG=$(find src-tauri/target -path "*/release/bundle/dmg/*.dmg" -type f | head -1 || true)
+            if [ -n "$BUILT_DMG" ]; then
+              cp "$BUILT_DMG" "release-assets/$NEW_DMG"
+              echo "Unsigned DMG copied: $NEW_DMG"
+            else
+              echo "No unsigned DMG generated; macOS zip and updater tarball will be published."
+            fi
           fi
 
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install create-dmg
-          NEW_DMG="CC-Switch-${VERSION}-macOS.dmg"
-          DMG_STAGE_DIR="$RUNNER_TEMP/dmg-stage"
-          rm -rf "$DMG_STAGE_DIR"
-          mkdir -p "$DMG_STAGE_DIR"
-          ditto "$APP_PATH" "$DMG_STAGE_DIR/CC Switch.app"
-
-          create-dmg \
-            --volname "CC Switch" \
-            --background "src-tauri/icons/dmg-background.png" \
-            --window-size 660 400 \
-            --window-pos 200 120 \
-            --icon-size 80 \
-            --icon "CC Switch.app" 180 220 \
-            --hide-extension "CC Switch.app" \
-            --app-drop-link 480 220 \
-            --codesign "$APPLE_SIGNING_IDENTITY" \
-            --no-internet-enable \
-            "release-assets/$NEW_DMG" \
-            "$DMG_STAGE_DIR"
-
-          rm -rf "$DMG_STAGE_DIR"
-          echo "✅ Styled DMG created: $NEW_DMG"
-
       - name: Notarize macOS DMG
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.apple-signing.outputs.available == 'true'
         shell: bash
         timeout-minutes: 30
         env:
@@ -347,7 +399,7 @@ jobs:
           done
 
       - name: Verify macOS code signing and notarization
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.apple-signing.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -391,6 +443,15 @@ jobs:
             exit 1
           fi
 
+      - name: Verify unsigned macOS artifacts
+        if: runner.os == 'macOS' && steps.apple-signing.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$(find release-assets -maxdepth 1 -name '*.tar.gz' -type f -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.zip' -type f -print -quit)"
+          echo "Unsigned macOS release assets are present."
+
       - name: Prepare Windows Assets
         if: runner.os == 'Windows'
         shell: pwsh
@@ -405,7 +466,7 @@ jobs:
             $msi = Get-ChildItem -Path 'src-tauri/target/release/bundle' -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
           }
           if ($null -ne $msi) {
-            $dest = "CC-Switch-$VERSION-Windows.msi"
+            $dest = "CCC-Switch-$VERSION-Windows.msi"
             Copy-Item $msi.FullName (Join-Path release-assets $dest)
             Write-Host "Installer copied: $dest"
             $sigPath = "$($msi.FullName).sig"
@@ -420,12 +481,14 @@ jobs:
           }
           # 绿色版（portable）：仅可执行文件打 zip（不参与 Updater）
           $exeCandidates = @(
+            'src-tauri/target/release/ccc-switch.exe',
+            'src-tauri/target/x86_64-pc-windows-msvc/release/ccc-switch.exe',
             'src-tauri/target/release/cc-switch.exe',
             'src-tauri/target/x86_64-pc-windows-msvc/release/cc-switch.exe'
           )
           $exePath = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           if ($null -ne $exePath) {
-            $portableDir = 'release-assets/CC-Switch-Portable'
+            $portableDir = 'release-assets/CCC-Switch-Portable'
             New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
             Copy-Item $exePath $portableDir
             $portableIniPath = Join-Path $portableDir 'portable.ini'
@@ -434,10 +497,10 @@ jobs:
               'portable=true'
             )
             $portableContent | Set-Content -Path $portableIniPath -Encoding UTF8
-            $portableZip = "release-assets/CC-Switch-$VERSION-Windows-Portable.zip"
+            $portableZip = "release-assets/CCC-Switch-$VERSION-Windows-Portable.zip"
             Compress-Archive -Path "$portableDir/*" -DestinationPath $portableZip -Force
             Remove-Item -Recurse -Force $portableDir
-            Write-Host "Windows portable zip created: CC-Switch-$VERSION-Windows-Portable.zip"
+            Write-Host "Windows portable zip created: CCC-Switch-$VERSION-Windows-Portable.zip"
           } else {
             Write-Warning 'Portable exe not found'
           }
@@ -453,7 +516,7 @@ jobs:
           # Updater artifact: AppImage（含对应 .sig）
           APPIMAGE=$(find src-tauri/target/release/bundle -name "*.AppImage" | head -1 || true)
           if [ -n "$APPIMAGE" ]; then
-            NEW_APPIMAGE="CC-Switch-${VERSION}-Linux-${ARCH}.AppImage"
+            NEW_APPIMAGE="CCC-Switch-${VERSION}-Linux-${ARCH}.AppImage"
             cp "$APPIMAGE" "release-assets/$NEW_APPIMAGE"
             [ -f "$APPIMAGE.sig" ] && cp "$APPIMAGE.sig" "release-assets/$NEW_APPIMAGE.sig" || echo ".sig for AppImage not found"
             echo "AppImage copied: $NEW_APPIMAGE"
@@ -463,16 +526,16 @@ jobs:
           # 额外上传 .deb（用于手动安装，不参与 Updater）
           DEB=$(find src-tauri/target/release/bundle -name "*.deb" | head -1 || true)
           if [ -n "$DEB" ]; then
-            cp "$DEB" "release-assets/CC-Switch-${VERSION}-Linux-${ARCH}.deb"
-            echo "Deb package copied: CC-Switch-${VERSION}-Linux-${ARCH}.deb"
+            cp "$DEB" "release-assets/CCC-Switch-${VERSION}-Linux-${ARCH}.deb"
+            echo "Deb package copied: CCC-Switch-${VERSION}-Linux-${ARCH}.deb"
           else
             echo "No .deb found (optional)"
           fi
           # 额外上传 .rpm（用于 Fedora/RHEL/openSUSE 等，不参与 Updater）
           RPM=$(find src-tauri/target/release/bundle -name "*.rpm" | head -1 || true)
           if [ -n "$RPM" ]; then
-            cp "$RPM" "release-assets/CC-Switch-${VERSION}-Linux-${ARCH}.rpm"
-            echo "RPM package copied: CC-Switch-${VERSION}-Linux-${ARCH}.rpm"
+            cp "$RPM" "release-assets/CCC-Switch-${VERSION}-Linux-${ARCH}.rpm"
+            echo "RPM package copied: CCC-Switch-${VERSION}-Linux-${ARCH}.rpm"
           else
             echo "No .rpm found (optional)"
           fi
@@ -538,26 +601,26 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
-          name: CC Switch ${{ github.ref_name }}
-          prerelease: true
+          name: CCC Switch ${{ github.ref_name }}
+          prerelease: false
           body: |
-            ## CC Switch ${{ github.ref_name }}
+            ## CCC Switch ${{ github.ref_name }}
 
-            🌐 **Only Official Website / 唯一官方网站 / 唯一の公式サイト**: [ccswitch.io](https://ccswitch.io)
+            CCC Switch release from `FerryboatSeranade/ccc-switch`.
 
-            Claude Code 供应商切换工具
+            Claude Code / Codex / Gemini CLI 供应商切换工具
 
             ### 下载
 
-            - **macOS**: `CC-Switch-${{ github.ref_name }}-macOS.dmg`（推荐）或 `CC-Switch-${{ github.ref_name }}-macOS.zip`（解压即用）
-            - **Windows**: `CC-Switch-${{ github.ref_name }}-Windows.msi`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-Portable.zip`（绿色版）
-            - **Linux (x86_64)**: `CC-Switch-${{ github.ref_name }}-Linux-x86_64.AppImage` / `.deb` / `.rpm`
-            - **Linux (ARM64)**: `CC-Switch-${{ github.ref_name }}-Linux-arm64.AppImage` / `.deb` / `.rpm`
+            - **macOS**: `CCC-Switch-${{ github.ref_name }}-macOS.dmg`（推荐）或 `CCC-Switch-${{ github.ref_name }}-macOS.zip`（解压即用）
+            - **Windows**: `CCC-Switch-${{ github.ref_name }}-Windows.msi`（安装版）或 `CCC-Switch-${{ github.ref_name }}-Windows-Portable.zip`（绿色版）
+            - **Linux (x86_64)**: `CCC-Switch-${{ github.ref_name }}-Linux-x86_64.AppImage` / `.deb` / `.rpm`
+            - **Linux (ARM64)**: `CCC-Switch-${{ github.ref_name }}-Linux-arm64.AppImage` / `.deb` / `.rpm`
 
             > `.tar.gz` 为 Tauri updater 自动更新专用，无需手动下载。
 
             ---
-            macOS 版本已通过 Apple 代码签名和公证，可直接安装使用。
+            如果仓库未配置 Apple 签名与公证 secrets，macOS 构建会以未公证资产发布。
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
