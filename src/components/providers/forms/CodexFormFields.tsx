@@ -363,72 +363,68 @@ export function CodexFormFields({
     </div>
   );
 
+  const renderGogoLoginRow = () => {
+    if (category === "official") return null;
+
+    return (
+      <div className="space-y-2 pl-1">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <Input
+            value={gogoAccount}
+            onChange={(event) => setGogoAccount(event.target.value)}
+            placeholder={t("codexConfig.gogoAccountPlaceholder", {
+              defaultValue: "GogoAI 账号 / 邮箱",
+            })}
+            autoComplete="username"
+          />
+          <Input
+            type="password"
+            value={gogoPassword}
+            onChange={(event) => setGogoPassword(event.target.value)}
+            placeholder={t("codexConfig.gogoPasswordPlaceholder", {
+              defaultValue: "密码",
+            })}
+            autoComplete="current-password"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void handleGogoLogin();
+              }
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void handleGogoLogin()}
+            disabled={isGogoLoggingIn}
+            title={t("codexConfig.gogoLoginTooltip", {
+              defaultValue:
+                "使用 GogoAI 账号获取 API Key，并填入 API Key 与 Base URL",
+            })}
+            className="gap-1.5 whitespace-nowrap"
+          >
+            {isGogoLoggingIn ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <KeyRound className="h-4 w-4" />
+            )}
+            {t("codexConfig.gogoLoginButton", {
+              defaultValue: "账号获取 Key",
+            })}
+          </Button>
+        </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {t("codexConfig.gogoLoginHint", {
+            defaultValue:
+              "获取成功后会填入 API Key 和 https://code.gogoais.com/v1；密码只用于本次请求，不会保存。",
+          })}
+        </p>
+      </div>
+    );
+  };
+
   return (
     <>
-      {category !== "official" && (
-        <div className="space-y-3 rounded-lg border border-border-default bg-muted/20 p-4">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
-              <KeyRound className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1 space-y-1">
-              <FormLabel>
-                {t("codexConfig.gogoLoginTitle", {
-                  defaultValue: "GogoAI 账号获取 Key",
-                })}
-              </FormLabel>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {t("codexConfig.gogoLoginHint", {
-                  defaultValue:
-                    "输入账号密码后获取 API Key，并自动填入 auth.json 与 config.toml；密码只用于本次请求，不会保存。",
-                })}
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_auto]">
-            <Input
-              value={gogoAccount}
-              onChange={(event) => setGogoAccount(event.target.value)}
-              placeholder={t("codexConfig.gogoAccountPlaceholder", {
-                defaultValue: "账号 / 邮箱",
-              })}
-              autoComplete="username"
-            />
-            <Input
-              type="password"
-              value={gogoPassword}
-              onChange={(event) => setGogoPassword(event.target.value)}
-              placeholder={t("codexConfig.gogoPasswordPlaceholder", {
-                defaultValue: "密码",
-              })}
-              autoComplete="current-password"
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void handleGogoLogin();
-                }
-              }}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void handleGogoLogin()}
-              disabled={isGogoLoggingIn}
-              className="gap-1.5"
-            >
-              {isGogoLoggingIn ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <KeyRound className="h-4 w-4" />
-              )}
-              {t("codexConfig.gogoLoginButton", {
-                defaultValue: "获取并填入",
-              })}
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Codex API Key 输入框 */}
       <ApiKeySection
         id="codexApiKey"
@@ -449,6 +445,7 @@ export function CodexFormFields({
           }),
         }}
       />
+      {renderGogoLoginRow()}
 
       {/* Codex Base URL 输入框 */}
       {shouldShowSpeedTest && (
