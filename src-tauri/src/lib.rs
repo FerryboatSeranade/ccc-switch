@@ -503,11 +503,10 @@ pub fn run() {
                 Err(e) => log::warn!("✗ Failed to read skills migration flag: {e}"),
             }
 
-            // 1.5. 自动导入 live 配置 + seed 官方预设供应商（Claude / Codex / Gemini）
+            // 1.5. 自动导入 live 配置
             //
-            // 先 import 后 seed 是有意为之：先把用户手动配置的 settings.json / auth.json / .env
-            // 落成 "default" provider 设为 current，再追加官方预设（is_current=false）。
-            // 这样用户切到官方预设时，回填机制会保护原 live 配置不丢失。
+            // 预设官方供应商不再在启动时自动创建，保持新安装的主列表清爽；
+            // 需要官方项的流程仍可通过 ensure_official_seed_by_id 按需补齐。
             //
             // 捕获首次运行快照：所有全新装用户都会看到欢迎弹窗介绍 CC Switch 的工作方式。
             // 读失败时默认不弹，宁可漏弹也不要因为故障打扰用户。
@@ -552,12 +551,12 @@ pub fn run() {
                 }
             }
 
-            match app_state.db.init_default_official_providers() {
-                Ok(count) if count > 0 => {
-                    log::info!("✓ Seeded {count} official provider(s)");
+            if crate::settings::get_settings().unify_codex_session_history {
+                match crate::services::provider::reapply_current_codex_official_live(&app_state) {
+                    Ok(true) => log::info!("✓ Reapplied Codex official live config for unified sessions"),
+                    Ok(false) => {}
+                    Err(e) => log::warn!("✗ Failed to reapply Codex official live config: {e}"),
                 }
-                Ok(_) => {}
-                Err(e) => log::warn!("✗ Failed to seed official providers: {e}"),
             }
 
             {
@@ -1109,8 +1108,14 @@ pub fn run() {
                 }
             }
 
-            // 静默启动：根据设置决定是否显示主窗口
             let settings = crate::settings::get_settings();
+            if settings.launch_on_startup {
+                if let Err(e) = crate::auto_launch::enable_auto_launch() {
+                    log::warn!("✗ Failed to enable auto launch from settings: {e}");
+                }
+            }
+
+            // 静默启动：根据设置决定是否显示主窗口
             if let Some(window) = app.get_webview_window("main") {
                 // 在窗口首次显示前同步装饰状态，避免前端加载后再切换导致标题栏闪烁
                 // 仅 Linux 生效：解决 Wayland 下系统窗口按钮不可用的问题

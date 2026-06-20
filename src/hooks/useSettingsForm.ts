@@ -1,13 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsQuery } from "@/lib/query";
-import type { Settings } from "@/types";
+import type { Settings, VisibleApps } from "@/types";
 
 type Language = "zh" | "zh-TW" | "en" | "ja";
 
 export type SettingsFormState = Omit<Settings, "language"> & {
   language: Language;
 };
+
+const DEFAULT_VISIBLE_APPS: VisibleApps = {
+  claude: false,
+  "claude-desktop": false,
+  codex: true,
+  gemini: false,
+  opencode: false,
+  openclaw: false,
+  hermes: false,
+};
+
+const createDefaultVisibleApps = (): VisibleApps => ({
+  ...DEFAULT_VISIBLE_APPS,
+});
 
 const normalizeLanguage = (lang?: string | null): Language => {
   if (!lang) return "zh";
@@ -113,12 +127,14 @@ export function useSettingsForm(): UseSettingsFormResult {
       minimizeToTrayOnClose: data.minimizeToTrayOnClose ?? true,
       useAppWindowControls: data.useAppWindowControls ?? false,
       enableClaudePluginIntegration:
-        data.enableClaudePluginIntegration ?? false,
+        data.enableClaudePluginIntegration ?? true,
+      launchOnStartup: data.launchOnStartup ?? true,
       silentStartup: data.silentStartup ?? false,
       skipClaudeOnboarding: data.skipClaudeOnboarding ?? false,
       preserveCodexOfficialAuthOnSwitch:
-        data.preserveCodexOfficialAuthOnSwitch ?? false,
-      unifyCodexSessionHistory: data.unifyCodexSessionHistory ?? false,
+        data.preserveCodexOfficialAuthOnSwitch ?? true,
+      unifyCodexSessionHistory: data.unifyCodexSessionHistory ?? true,
+      visibleApps: data.visibleApps ?? createDefaultVisibleApps(),
       claudeConfigDir: sanitizeDir(data.claudeConfigDir),
       codexConfigDir: sanitizeDir(data.codexConfigDir),
       geminiConfigDir: sanitizeDir(data.geminiConfigDir),
@@ -141,10 +157,12 @@ export function useSettingsForm(): UseSettingsFormResult {
             showInTray: true,
             minimizeToTrayOnClose: true,
             useAppWindowControls: false,
-            enableClaudePluginIntegration: false,
+            enableClaudePluginIntegration: true,
+            launchOnStartup: true,
             skipClaudeOnboarding: false,
-            preserveCodexOfficialAuthOnSwitch: false,
-            unifyCodexSessionHistory: false,
+            preserveCodexOfficialAuthOnSwitch: true,
+            unifyCodexSessionHistory: true,
+            visibleApps: createDefaultVisibleApps(),
             language: readPersistedLanguage(),
           } as SettingsFormState);
 
@@ -179,12 +197,14 @@ export function useSettingsForm(): UseSettingsFormResult {
         minimizeToTrayOnClose: serverData.minimizeToTrayOnClose ?? true,
         useAppWindowControls: serverData.useAppWindowControls ?? false,
         enableClaudePluginIntegration:
-          serverData.enableClaudePluginIntegration ?? false,
+          serverData.enableClaudePluginIntegration ?? true,
+        launchOnStartup: serverData.launchOnStartup ?? true,
         silentStartup: serverData.silentStartup ?? false,
         skipClaudeOnboarding: serverData.skipClaudeOnboarding ?? false,
         preserveCodexOfficialAuthOnSwitch:
-          serverData.preserveCodexOfficialAuthOnSwitch ?? false,
-        unifyCodexSessionHistory: serverData.unifyCodexSessionHistory ?? false,
+          serverData.preserveCodexOfficialAuthOnSwitch ?? true,
+        unifyCodexSessionHistory: serverData.unifyCodexSessionHistory ?? true,
+        visibleApps: serverData.visibleApps ?? createDefaultVisibleApps(),
         claudeConfigDir: sanitizeDir(serverData.claudeConfigDir),
         codexConfigDir: sanitizeDir(serverData.codexConfigDir),
         geminiConfigDir: sanitizeDir(serverData.geminiConfigDir),

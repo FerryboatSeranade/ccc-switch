@@ -25,7 +25,7 @@ export function WindowSettings({ settings, onChange }: WindowSettingsProps) {
           icon={<Power className="h-4 w-4 text-orange-500" />}
           title={t("settings.launchOnStartup")}
           description={t("settings.launchOnStartupDescription")}
-          checked={!!settings.launchOnStartup}
+          checked={settings.launchOnStartup ?? true}
           onCheckedChange={(value) => onChange({ launchOnStartup: value })}
         />
 
@@ -53,7 +53,7 @@ export function WindowSettings({ settings, onChange }: WindowSettingsProps) {
           icon={<MonitorUp className="h-4 w-4 text-purple-500" />}
           title={t("settings.enableClaudePluginIntegration")}
           description={t("settings.enableClaudePluginIntegrationDescription")}
-          checked={!!settings.enableClaudePluginIntegration}
+          checked={settings.enableClaudePluginIntegration ?? true}
           onCheckedChange={(value) =>
             onChange({ enableClaudePluginIntegration: value })
           }

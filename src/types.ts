@@ -363,7 +363,7 @@ export interface Settings {
   // 首选语言（可选，默认中文）
   language?: "en" | "zh" | "zh-TW" | "ja";
 
-  // 主页面显示的应用（默认全部显示）
+  // 主页面显示的应用（默认只显示 Codex）
   visibleApps?: VisibleApps;
 
   // ===== 设备级目录覆盖 =====

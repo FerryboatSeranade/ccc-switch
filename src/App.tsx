@@ -132,7 +132,7 @@ const getInitialApp = (): AppId => {
   if (saved && VALID_APPS.includes(saved)) {
     return saved;
   }
-  return "claude";
+  return "codex";
 };
 
 const VIEW_STORAGE_KEY = "cc-switch-last-view";
@@ -183,13 +183,13 @@ function App() {
   const dragBarHeight = useAppWindowControls ? 32 : DEFAULT_DRAG_BAR_HEIGHT;
   const contentTopOffset = dragBarHeight + HEADER_HEIGHT;
   const visibleApps: VisibleApps = settingsData?.visibleApps ?? {
-    claude: true,
-    "claude-desktop": true,
+    claude: false,
+    "claude-desktop": false,
     codex: true,
-    gemini: true,
-    opencode: true,
-    openclaw: true,
-    hermes: true,
+    gemini: false,
+    opencode: false,
+    openclaw: false,
+    hermes: false,
   };
 
   const getFirstVisibleApp = (): AppId => {
@@ -200,7 +200,7 @@ function App() {
     if (visibleApps.opencode) return "opencode";
     if (visibleApps.openclaw) return "openclaw";
     if (visibleApps.hermes) return "hermes";
-    return "claude"; // fallback
+    return "codex"; // fallback
   };
 
   useEffect(() => {

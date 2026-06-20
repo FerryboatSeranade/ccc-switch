@@ -56,6 +56,7 @@ import {
   type ClaudeDesktopProviderPreset,
   type ClaudeDesktopRoleId,
 } from "@/config/claudeDesktopProviderPresets";
+import { SHOW_BUILT_IN_PROVIDER_PRESETS } from "@/config/providerPresetVisibility";
 import {
   fetchModelsForConfig,
   showFetchModelsError,
@@ -350,11 +351,16 @@ export function ClaudeDesktopProviderForm({
   }, [form.formState.isSubmitting, isFetchingModels, onSubmittingChange]);
 
   const presetEntries = useMemo<PresetEntry[]>(
-    () =>
-      claudeDesktopProviderPresets.map((preset, index) => ({
+    () => {
+      if (!SHOW_BUILT_IN_PROVIDER_PRESETS) {
+        return [];
+      }
+
+      return claudeDesktopProviderPresets.map((preset, index) => ({
         id: `claude-desktop-${index}`,
         preset,
-      })),
+      }));
+    },
     [],
   );
 

@@ -26,22 +26,22 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VisibleApps {
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub claude: bool,
     #[serde(
         rename = "claude-desktop",
         alias = "claudeDesktop",
         alias = "claude_desktop",
-        default = "default_true"
+        default
     )]
     pub claude_desktop: bool,
     #[serde(default = "default_true")]
     pub codex: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub gemini: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub opencode: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub openclaw: bool,
     #[serde(default)]
     pub hermes: bool,
@@ -50,13 +50,13 @@ pub struct VisibleApps {
 impl Default for VisibleApps {
     fn default() -> Self {
         Self {
-            claude: true,
-            claude_desktop: true,
+            claude: false,
+            claude_desktop: false,
             codex: true,
-            gemini: true,
-            opencode: true,
-            openclaw: true,
-            hermes: false, // 默认不显示，需用户手动启用
+            gemini: false,
+            opencode: false,
+            openclaw: false,
+            hermes: false,
         }
     }
 }
@@ -346,13 +346,13 @@ pub struct AppSettings {
     #[serde(default)]
     pub use_app_window_controls: bool,
     /// 是否启用 Claude 插件联动
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub enable_claude_plugin_integration: bool,
     /// 是否跳过 Claude Code 初次安装确认
     #[serde(default)]
     pub skip_claude_onboarding: bool,
     /// 是否开机自启
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub launch_on_startup: bool,
     /// 静默启动（程序启动时不显示主窗口，仅托盘运行）
     #[serde(default)]
@@ -373,13 +373,12 @@ pub struct AppSettings {
     #[serde(default)]
     pub enable_failover_toggle: bool,
     /// Keep Codex ChatGPT login material in auth.json when switching to third-party providers.
-    /// Opt-in: defaults to false so third-party switches cleanly overwrite auth.json.
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub preserve_codex_official_auth_on_switch: bool,
     /// Run official Codex providers under the shared "custom" model_provider id
     /// so official sessions share one resume-history bucket with third-party
-    /// providers. Opt-in: defaults to false.
-    #[serde(default)]
+    /// providers.
+    #[serde(default = "default_true")]
     pub unify_codex_session_history: bool,
     /// User opted in (via the enable dialog checkbox) to migrate existing
     /// official sessions ("openai" bucket) into the shared bucket. Persisted so
@@ -494,17 +493,17 @@ impl Default for AppSettings {
             show_in_tray: true,
             minimize_to_tray_on_close: true,
             use_app_window_controls: false,
-            enable_claude_plugin_integration: false,
+            enable_claude_plugin_integration: true,
             skip_claude_onboarding: false,
-            launch_on_startup: false,
+            launch_on_startup: true,
             silent_startup: false,
             enable_local_proxy: false,
             proxy_confirmed: None,
             usage_confirmed: None,
             stream_check_confirmed: None,
             enable_failover_toggle: false,
-            preserve_codex_official_auth_on_switch: false,
-            unify_codex_session_history: false,
+            preserve_codex_official_auth_on_switch: true,
+            unify_codex_session_history: true,
             unify_codex_migrate_existing: None,
             failover_confirmed: None,
             first_run_notice_confirmed: None,
@@ -1114,18 +1113,17 @@ mod tests {
     use crate::app_config::AppType;
 
     #[test]
-    fn visible_apps_old_settings_default_claude_desktop_visible() {
-        let visible: VisibleApps = serde_json::from_value(serde_json::json!({
-            "claude": true,
-            "codex": true,
-            "gemini": true,
-            "opencode": true,
-            "openclaw": true,
-            "hermes": true
-        }))
-        .expect("visible apps");
+    fn visible_apps_old_settings_default_only_codex_visible() {
+        let visible: VisibleApps =
+            serde_json::from_value(serde_json::json!({})).expect("visible apps");
 
-        assert!(visible.is_visible(&AppType::ClaudeDesktop));
+        assert!(!visible.is_visible(&AppType::Claude));
+        assert!(!visible.is_visible(&AppType::ClaudeDesktop));
+        assert!(visible.is_visible(&AppType::Codex));
+        assert!(!visible.is_visible(&AppType::Gemini));
+        assert!(!visible.is_visible(&AppType::OpenCode));
+        assert!(!visible.is_visible(&AppType::OpenClaw));
+        assert!(!visible.is_visible(&AppType::Hermes));
     }
 
     #[test]

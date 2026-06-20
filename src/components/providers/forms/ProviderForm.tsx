@@ -45,6 +45,7 @@ import {
   hermesProviderPresets,
   type HermesProviderPreset,
 } from "@/config/hermesProviderPresets";
+import { SHOW_BUILT_IN_PROVIDER_PRESETS } from "@/config/providerPresetVisibility";
 import { OpenCodeFormFields } from "./OpenCodeFormFields";
 import { OpenClawFormFields } from "./OpenClawFormFields";
 import { HermesFormFields } from "./HermesFormFields";
@@ -607,6 +608,10 @@ function ProviderFormFull({
   );
 
   const presetEntries = useMemo(() => {
+    if (!SHOW_BUILT_IN_PROVIDER_PRESETS) {
+      return [];
+    }
+
     if (appId === "codex") {
       return codexProviderPresets.map<PresetEntry>((preset, index) => ({
         id: `codex-${index}`,

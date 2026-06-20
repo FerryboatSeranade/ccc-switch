@@ -50,7 +50,19 @@ describe("useSettingsForm Hook", () => {
     const settings = result.current.settings!;
     expect(settings.showInTray).toBe(true);
     expect(settings.minimizeToTrayOnClose).toBe(true);
-    expect(settings.enableClaudePluginIntegration).toBe(false);
+    expect(settings.enableClaudePluginIntegration).toBe(true);
+    expect(settings.launchOnStartup).toBe(true);
+    expect(settings.preserveCodexOfficialAuthOnSwitch).toBe(true);
+    expect(settings.unifyCodexSessionHistory).toBe(true);
+    expect(settings.visibleApps).toEqual({
+      claude: false,
+      "claude-desktop": false,
+      codex: true,
+      gemini: false,
+      opencode: false,
+      openclaw: false,
+      hermes: false,
+    });
     expect(settings.claudeConfigDir).toBe("/Users/demo");
     expect(settings.codexConfigDir).toBeUndefined();
     expect(settings.language).toBe("en");
