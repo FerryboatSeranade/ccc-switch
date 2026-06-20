@@ -1,11 +1,11 @@
 {
-  "name": "cc-switch",
+  "name": "ccc-switch",
   "version": "3.16.3",
   "description": "All-in-One Assistant for Claude Code, Codex & Gemini CLI",
   "type": "module",
   "scripts": {
-    "dev": "pnpm tauri dev",
-    "build": "pnpm tauri build",
+    "dev": "corepack pnpm@9.15.9 tauri dev",
+    "build": "corepack pnpm@9.15.9 tauri build",
     "tauri": "tauri",
     "dev:renderer": "vite",
     "build:renderer": "vite build",

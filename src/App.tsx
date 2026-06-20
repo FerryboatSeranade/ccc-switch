@@ -76,6 +76,7 @@ import UnifiedSkillsPanel from "@/components/skills/UnifiedSkillsPanel";
 import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
 import { FirstRunNoticeDialog } from "@/components/FirstRunNoticeDialog";
 import { AgentsPanel } from "@/components/agents/AgentsPanel";
+import { CodexAccountPanel } from "@/components/codex/CodexAccountPanel";
 import { UniversalProviderPanel } from "@/components/universal";
 import { McpIcon } from "@/components/BrandIcons";
 import { Button } from "@/components/ui/button";
@@ -116,7 +117,7 @@ interface SyncStatusUpdatedPayload {
 const DEFAULT_DRAG_BAR_HEIGHT = isWindows() || isLinux() ? 0 : 28; // px
 const HEADER_HEIGHT = 64; // px
 
-const STORAGE_KEY = "cc-switch-last-app";
+const STORAGE_KEY = "ccc-switch-last-app";
 const VALID_APPS: AppId[] = [
   "claude",
   "claude-desktop",
@@ -135,7 +136,7 @@ const getInitialApp = (): AppId => {
   return "codex";
 };
 
-const VIEW_STORAGE_KEY = "cc-switch-last-view";
+const VIEW_STORAGE_KEY = "ccc-switch-last-view";
 const VALID_VIEWS: View[] = [
   "providers",
   "settings",
@@ -945,6 +946,7 @@ function App() {
                     transition={{ duration: 0.15 }}
                     className="space-y-4"
                   >
+                    {activeApp === "codex" && <CodexAccountPanel />}
                     <ProviderList
                       providers={providers}
                       currentProviderId={currentProviderId}
@@ -1159,19 +1161,16 @@ function App() {
             ) : (
               <div className="flex items-center gap-2">
                 <div className="relative inline-flex items-center">
-                  <a
-                    href="https://ccswitch.io"
-                    target="_blank"
-                    rel="noreferrer"
+                  <span
                     className={cn(
                       "text-xl font-semibold transition-colors",
                       isProxyRunning && isCurrentAppTakeoverActive
-                        ? "text-emerald-500 hover:text-emerald-600 dark:text-emerald-400 dark:hover:text-emerald-300"
-                        : "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300",
+                        ? "text-emerald-500 dark:text-emerald-400"
+                        : "text-blue-500 dark:text-blue-400",
                     )}
                   >
-                    CC Switch
-                  </a>
+                    CCC Switch
+                  </span>
                 </div>
                 <Button
                   variant="ghost"

@@ -312,9 +312,9 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "火山Agentplan",
     websiteUrl:
-      "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     apiKeyUrl:
-      "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     settingsConfig: {
       npm: "@ai-sdk/openai-compatible",
       name: "火山Agentplan",
@@ -345,9 +345,9 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "BytePlus",
     websiteUrl:
-      "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     apiKeyUrl:
-      "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     settingsConfig: {
       npm: "@ai-sdk/openai-compatible",
       name: "BytePlus",
@@ -378,9 +378,9 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "DouBaoSeed",
     websiteUrl:
-      "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     apiKeyUrl:
-      "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     settingsConfig: {
       npm: "@ai-sdk/openai-compatible",
       name: "DouBaoSeed",
@@ -591,8 +591,8 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "Kimi K2.7 Code",
     primePartner: true,
-    websiteUrl: "https://platform.moonshot.cn/console?aff=cc-switch",
-    apiKeyUrl: "https://platform.moonshot.cn/console/api-keys?aff=cc-switch",
+    websiteUrl: "https://platform.moonshot.cn/console",
+    apiKeyUrl: "https://platform.moonshot.cn/console/api-keys",
     settingsConfig: {
       npm: "@ai-sdk/openai-compatible",
       name: "Kimi K2.7 Code",
@@ -625,8 +625,8 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "Kimi For Coding",
     primePartner: true,
-    websiteUrl: "https://www.kimi.com/code/docs/?aff=cc-switch",
-    apiKeyUrl: "https://platform.moonshot.cn/console/api-keys?aff=cc-switch",
+    websiteUrl: "https://www.kimi.com/code/docs/",
+    apiKeyUrl: "https://platform.moonshot.cn/console/api-keys",
     settingsConfig: {
       npm: "@ai-sdk/anthropic",
       name: "Kimi For Coding",
@@ -1246,7 +1246,7 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "PackyCode",
     websiteUrl: "https://www.packyapi.com",
-    apiKeyUrl: "https://www.packyapi.com/register?aff=cc-switch",
+    apiKeyUrl: "https://www.packyapi.com/register",
     settingsConfig: {
       npm: "@ai-sdk/anthropic",
       name: "PackyCode",
@@ -1506,7 +1506,7 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "ClaudeCN",
     websiteUrl: "https://claudecn.top",
-    apiKeyUrl: "https://claudecn.top/register?aff=ccswitch",
+    apiKeyUrl: "https://claudecn.top/register",
     settingsConfig: {
       npm: "@ai-sdk/anthropic",
       name: "ClaudeCN",
@@ -1566,7 +1566,7 @@ export const opencodeProviderPresets: OpenCodeProviderPreset[] = [
   {
     name: "CrazyRouter",
     websiteUrl: "https://www.crazyrouter.com",
-    apiKeyUrl: "https://www.crazyrouter.com/register?aff=OZcm&ref=cc-switch",
+    apiKeyUrl: "https://www.crazyrouter.com/register?aff=OZcm",
     settingsConfig: {
       npm: "@ai-sdk/anthropic",
       name: "CrazyRouter",

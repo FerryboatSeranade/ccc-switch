@@ -148,9 +148,9 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
   {
     name: "火山Agentplan",
     websiteUrl:
-      "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     apiKeyUrl:
-      "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     settingsConfig: {
       baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
       apiKey: "",
@@ -185,9 +185,9 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
   {
     name: "BytePlus",
     websiteUrl:
-      "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     apiKeyUrl:
-      "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     settingsConfig: {
       baseUrl: "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
       apiKey: "",
@@ -222,9 +222,9 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
   {
     name: "DouBaoSeed",
     websiteUrl:
-      "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     apiKeyUrl:
-      "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+      "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_medium=devrel_tool_web&utm_source=OWO",
     settingsConfig: {
       baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
       apiKey: "",
@@ -493,7 +493,7 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
   {
     name: "Kimi K2.7 Code",
     primePartner: true,
-    websiteUrl: "https://platform.moonshot.cn/console?aff=cc-switch",
+    websiteUrl: "https://platform.moonshot.cn/console",
     apiKeyUrl: "https://platform.moonshot.cn/console/api-keys",
     settingsConfig: {
       baseUrl: "https://api.moonshot.cn/v1",
@@ -532,7 +532,7 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
   {
     name: "Kimi For Coding",
     primePartner: true,
-    websiteUrl: "https://www.kimi.com/code/docs/?aff=cc-switch",
+    websiteUrl: "https://www.kimi.com/code/docs/",
     apiKeyUrl: "https://platform.moonshot.cn/console/api-keys",
     settingsConfig: {
       baseUrl: "https://api.kimi.com/v1",
@@ -1063,7 +1063,7 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
   {
     name: "ClaudeCN",
     websiteUrl: "https://claudecn.top",
-    apiKeyUrl: "https://claudecn.top/register?aff=ccswitch",
+    apiKeyUrl: "https://claudecn.top/register",
     settingsConfig: {
       baseUrl: "https://claudecn.top",
       apiKey: "",
@@ -1497,7 +1497,7 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
   {
     name: "PackyCode",
     websiteUrl: "https://www.packyapi.com",
-    apiKeyUrl: "https://www.packyapi.com/register?aff=cc-switch",
+    apiKeyUrl: "https://www.packyapi.com/register",
     settingsConfig: {
       baseUrl: "https://www.packyapi.com",
       apiKey: "",
@@ -1869,7 +1869,7 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
   {
     name: "CrazyRouter",
     websiteUrl: "https://www.crazyrouter.com",
-    apiKeyUrl: "https://www.crazyrouter.com/register?aff=OZcm&ref=cc-switch",
+    apiKeyUrl: "https://www.crazyrouter.com/register?aff=OZcm",
     settingsConfig: {
       baseUrl: "https://cn.crazyrouter.com/v1",
       apiKey: "",
@@ -1962,8 +1962,7 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
     name: "Compshare",
     nameKey: "providerForm.presets.ucloud",
     websiteUrl: "https://www.compshare.cn",
-    apiKeyUrl:
-      "https://www.compshare.cn/coding-plan?ytag=GPU_YY_YX_git_cc-switch",
+    apiKeyUrl: "https://www.compshare.cn/coding-plan",
     settingsConfig: {
       baseUrl: "https://api.modelverse.cn/v1",
       apiKey: "",
@@ -2002,8 +2001,7 @@ export const openclawProviderPresets: OpenClawProviderPreset[] = [
     name: "Compshare Coding Plan",
     nameKey: "providerForm.presets.ucloudCoding",
     websiteUrl: "https://www.compshare.cn",
-    apiKeyUrl:
-      "https://www.compshare.cn/coding-plan?ytag=GPU_YY_YX_git_cc-switch",
+    apiKeyUrl: "https://www.compshare.cn/coding-plan",
     settingsConfig: {
       baseUrl: "https://cp.compshare.cn/v1",
       apiKey: "",
