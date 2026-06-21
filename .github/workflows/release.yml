@@ -126,17 +126,32 @@ jobs:
             printf 'Missing: %s\n' "${missing[*]}"
           fi
 
-      - name: Prepare Tauri signing key
+      - name: Detect Tauri updater signing availability
+        id: tauri-signing
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_SECRET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          # 调试：检查 Secret 是否存在
-          if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
-            echo "❌ TAURI_SIGNING_PRIVATE_KEY Secret 为空或不存在" >&2
-            echo "请检查 GitHub 仓库 Settings > Secrets and variables > Actions" >&2
-            exit 1
+          set -euo pipefail
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY_SECRET:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "TAURI_UPDATER_SIGNING_AVAILABLE=true" >> "$GITHUB_ENV"
+            echo "Tauri updater signing key is configured; updater artifacts will be signed."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "TAURI_UPDATER_SIGNING_AVAILABLE=false" >> "$GITHUB_ENV"
+            echo "Tauri updater signing key is not configured; installer assets will still be built."
           fi
-          
-          RAW="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
+
+      - name: Prepare Tauri signing key
+        if: steps.tauri-signing.outputs.available == 'true'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_SECRET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          RAW="${TAURI_SIGNING_PRIVATE_KEY_SECRET}"
           # 目标：提供正确的私钥“文件路径”给 Tauri CLI，避免内容解码歧义
           KEY_PATH="$RUNNER_TEMP/tauri_signing.key"
           # 情况 1：原始两行文本（第一行以 "untrusted comment:" 开头）
@@ -177,8 +192,8 @@ jobs:
             exit 1
           fi
           echo "TAURI_SIGNING_PRIVATE_KEY=$KEY_B64" >> "$GITHUB_ENV"
-          if [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" ]; then
-            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> $GITHUB_ENV
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET:-}" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET}" >> "$GITHUB_ENV"
           fi
           echo "✅ Tauri signing key prepared"
 
@@ -232,7 +247,11 @@ jobs:
           set -euo pipefail
           echo "Apple signing secrets are not configured; building unsigned macOS artifacts."
           unset APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
-          pnpm tauri build --target universal-apple-darwin
+          if [ "${TAURI_UPDATER_SIGNING_AVAILABLE:-false}" = "true" ]; then
+            pnpm tauri build --target universal-apple-darwin
+          else
+            pnpm tauri build --target universal-apple-darwin --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          fi
 
       - name: Build Tauri App (macOS signed)
         if: runner.os == 'macOS' && steps.apple-signing.outputs.available == 'true'
@@ -249,7 +268,13 @@ jobs:
           max_attempts=3
           for attempt in $(seq 1 "$max_attempts"); do
             echo "=== macOS build/notarization attempt ${attempt}/${max_attempts} ==="
-            if pnpm tauri build --target universal-apple-darwin; then
+            if [ "${TAURI_UPDATER_SIGNING_AVAILABLE:-false}" = "true" ]; then
+              build_cmd=(pnpm tauri build --target universal-apple-darwin)
+            else
+              build_cmd=(pnpm tauri build --target universal-apple-darwin --config '{"bundle":{"createUpdaterArtifacts":false}}')
+            fi
+
+            if "${build_cmd[@]}"; then
               echo "✅ macOS build/notarization succeeded"
               exit 0
             fi
@@ -266,11 +291,24 @@ jobs:
 
       - name: Build Tauri App (Windows)
         if: runner.os == 'Windows'
-        run: pnpm tauri build
+        shell: pwsh
+        run: |
+          if ($env:TAURI_UPDATER_SIGNING_AVAILABLE -eq 'true') {
+            pnpm tauri build
+          } else {
+            pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          }
 
       - name: Build Tauri App (Linux)
         if: runner.os == 'Linux'
-        run: pnpm tauri build --bundles appimage,deb,rpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${TAURI_UPDATER_SIGNING_AVAILABLE:-false}" = "true" ]; then
+            pnpm tauri build --bundles appimage,deb,rpm
+          else
+            pnpm tauri build --bundles appimage,deb,rpm --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          fi
 
       - name: Prepare macOS Assets
         if: runner.os == 'macOS'
@@ -293,10 +331,6 @@ jobs:
             fi
           done
 
-          if [ -z "$TAR_GZ" ]; then
-            echo "❌ No macOS .tar.gz updater artifact found" >&2
-            exit 1
-          fi
           if [ -z "$APP_PATH" ]; then
             echo "❌ No .app found" >&2
             exit 1
@@ -311,10 +345,14 @@ jobs:
           fi
 
           # 1) Collect .tar.gz (updater artifact)
-          NEW_TAR_GZ="Codex-Switch-${VERSION}-macOS.tar.gz"
-          cp "$TAR_GZ" "release-assets/$NEW_TAR_GZ"
-          [ -f "$TAR_GZ.sig" ] && cp "$TAR_GZ.sig" "release-assets/$NEW_TAR_GZ.sig" || echo ".sig for macOS not found yet"
-          echo "macOS updater artifact copied: $NEW_TAR_GZ"
+          if [ -n "$TAR_GZ" ]; then
+            NEW_TAR_GZ="Codex-Switch-${VERSION}-macOS.tar.gz"
+            cp "$TAR_GZ" "release-assets/$NEW_TAR_GZ"
+            [ -f "$TAR_GZ.sig" ] && cp "$TAR_GZ.sig" "release-assets/$NEW_TAR_GZ.sig" || echo ".sig for macOS not found yet"
+            echo "macOS updater artifact copied: $NEW_TAR_GZ"
+          else
+            echo "No macOS updater tarball generated; publishing installer assets only."
+          fi
 
           # 2) Collect .app as zip
           NEW_ZIP="Codex-Switch-${VERSION}-macOS.zip"
@@ -454,8 +492,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$(find release-assets -maxdepth 1 -name '*.tar.gz' -type f -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -name '*.zip' -type f -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -type f -print -quit)" || echo "Unsigned DMG not generated; zip is available."
           echo "Unsigned macOS release assets are present."
 
       - name: Prepare Windows Assets
@@ -652,7 +690,12 @@ jobs:
           mkdir -p dl
           gh release download "$TAG" --dir dl --repo "$GITHUB_REPOSITORY"
           ls -la dl || true
+          if ! find dl -maxdepth 1 -name '*.sig' -type f -print -quit | grep -q .; then
+            echo "No updater signatures found; latest.json will be skipped."
+            echo "SKIP_LATEST_JSON=true" >> "$GITHUB_ENV"
+          fi
       - name: Generate latest.json
+        if: env.SKIP_LATEST_JSON != 'true'
         env:
           REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
@@ -722,6 +765,7 @@ jobs:
           echo "Generated latest.json:" && cat "$tmp_json"
           mv "$tmp_json" latest.json
       - name: Upload latest.json to release
+        if: env.SKIP_LATEST_JSON != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
