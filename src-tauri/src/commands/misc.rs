@@ -52,8 +52,15 @@ pub async fn copy_text_to_clipboard(text: String) -> Result<bool, String> {
 
 /// 检查更新
 #[tauri::command]
-pub async fn check_for_updates(_handle: AppHandle) -> Result<bool, String> {
-    Err("更新地址未配置".to_string())
+pub async fn check_for_updates(handle: AppHandle) -> Result<bool, String> {
+    const LATEST_RELEASE_URL: &str = "https://github.com/FerryboatSeranade/ccc-switch/releases/latest";
+
+    handle
+        .opener()
+        .open_url(LATEST_RELEASE_URL, None::<String>)
+        .map_err(|e| format!("打开更新页面失败: {e}"))?;
+
+    Ok(true)
 }
 
 /// 判断是否为便携版（绿色版）运行
