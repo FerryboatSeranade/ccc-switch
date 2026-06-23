@@ -90,6 +90,8 @@ import ToolsPanel from "@/components/openclaw/ToolsPanel";
 import AgentsDefaultsPanel from "@/components/openclaw/AgentsDefaultsPanel";
 import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
 import HermesMemoryPanel from "@/components/hermes/HermesMemoryPanel";
+import { useUpdate } from "@/contexts/UpdateContext";
+import { getCurrentVersion } from "@/lib/updater";
 
 type View =
   | "providers"
@@ -164,6 +166,7 @@ const getInitialView = (): View => {
 function App() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const { hasUpdate, updateInfo, checkUpdate, resetDismiss } = useUpdate();
 
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
   const sharedFeatureApp: AppId =
@@ -172,6 +175,34 @@ function App() {
   const [settingsDefaultTab, setSettingsDefaultTab] = useState("general");
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+  const [isPortable, setIsPortable] = useState(false);
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadAppMeta = async () => {
+      const [versionResult, portableResult] = await Promise.allSettled([
+        getCurrentVersion(),
+        settingsApi.isPortable(),
+      ]);
+
+      if (!active) return;
+
+      if (versionResult.status === "fulfilled") {
+        setAppVersion(versionResult.value);
+      }
+      if (portableResult.status === "fulfilled") {
+        setIsPortable(portableResult.value);
+      }
+    };
+
+    void loadAppMeta();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(VIEW_STORAGE_KEY, currentView);
@@ -610,6 +641,59 @@ function App() {
           defaultValue: "链接打开失败",
         });
       toast.error(detail);
+    }
+  };
+
+  const handleHeaderUpdateClick = async () => {
+    if (hasUpdate) {
+      if (isPortable || updateInfo?.source === "github-release") {
+        try {
+          await settingsApi.checkUpdates();
+        } catch (error) {
+          console.error("[App] Failed to open release page", error);
+          toast.error(t("settings.openReleaseNotesFailed"), {
+            description: extractErrorMessage(error) || undefined,
+            closeButton: true,
+          });
+        }
+        return;
+      }
+
+      setIsInstallingUpdate(true);
+      try {
+        resetDismiss();
+        const installed = await settingsApi.installUpdateAndRestart();
+        if (!installed) {
+          toast.success(t("settings.upToDate"), { closeButton: true });
+        }
+      } catch (error) {
+        console.error("[App] Update failed", error);
+        toast.error(t("settings.updateFailed"), {
+          description: extractErrorMessage(error) || undefined,
+          closeButton: true,
+        });
+        try {
+          await settingsApi.checkUpdates();
+        } catch (fallbackError) {
+          console.error("[App] Failed to open fallback updater", fallbackError);
+        }
+      } finally {
+        setIsInstallingUpdate(false);
+      }
+      return;
+    }
+
+    try {
+      const available = await checkUpdate();
+      if (!available) {
+        toast.success(t("settings.upToDate"), { closeButton: true });
+      }
+    } catch (error) {
+      console.error("[App] Check update failed", error);
+      toast.error(t("settings.checkUpdateFailed"), {
+        description: extractErrorMessage(error) || undefined,
+        closeButton: true,
+      });
     }
   };
 
@@ -1168,9 +1252,18 @@ function App() {
                         : "text-blue-500 dark:text-blue-400",
                     )}
                   >
-                    Codex Switch
+                    CodexSwitch
                   </span>
                 </div>
+                {appVersion && (
+                  <span
+                    title={t("settings.currentVersion")}
+                    aria-label={`${t("settings.currentVersion")}: v${appVersion}`}
+                    className="inline-flex h-5 shrink-0 items-center rounded-md border border-border-default/70 bg-muted/40 px-1.5 text-[11px] font-medium leading-none text-muted-foreground"
+                  >
+                    v{appVersion}
+                  </span>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -1184,10 +1277,9 @@ function App() {
                   <Settings className="w-4 h-4" />
                 </Button>
                 <UpdateBadge
-                  onClick={() => {
-                    setSettingsDefaultTab("general");
-                    setCurrentView("settings");
-                  }}
+                  alwaysVisible
+                  isInstalling={isInstallingUpdate}
+                  onClick={() => void handleHeaderUpdateClick()}
                 />
                 {isCurrentAppTakeoverActive && (
                   <Button

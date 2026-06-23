@@ -846,6 +846,12 @@ pub fn unify_codex_migrate_existing_requested() -> bool {
     get_settings().unify_codex_migrate_existing.unwrap_or(false)
 }
 
+pub fn request_codex_unify_migrate_existing() -> Result<(), AppError> {
+    mutate_settings(|settings| {
+        settings.unify_codex_migrate_existing = Some(true);
+    })
+}
+
 pub fn clear_codex_unify_migrate_existing() -> Result<(), AppError> {
     mutate_settings(|settings| {
         settings.unify_codex_migrate_existing = None;

@@ -129,10 +129,53 @@ pub struct CodexUnifyHistoryRestoreResult {
     pub skipped_reason: Option<String>,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexUnifyHistoryMigrationResult {
+    pub migrated_jsonl_files: usize,
+    pub migrated_state_rows: usize,
+    /// 迁移被跳过的原因（如开关关闭、live 尚未统一）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped_reason: Option<String>,
+}
+
 /// 是否存在统一会话开关的迁移备份（决定关闭弹窗里是否显示"恢复备份"勾选）。
 #[tauri::command]
 pub async fn has_codex_unify_history_backup() -> Result<bool, String> {
     Ok(crate::codex_history_migration::has_codex_official_history_unify_backup())
+}
+
+/// 手动把既有官方 Codex 会话历史迁入统一 custom 桶。
+#[tauri::command]
+pub async fn migrate_codex_unified_history(
+    state: tauri::State<'_, crate::store::AppState>,
+) -> Result<CodexUnifyHistoryMigrationResult, String> {
+    crate::settings::request_codex_unify_migrate_existing().map_err(|e| e.to_string())?;
+    crate::services::provider::reapply_current_codex_official_live(state.inner())
+        .map_err(|e| e.to_string())?;
+
+    let outcome = tauri::async_runtime::spawn_blocking(|| {
+        crate::codex_history_migration::maybe_migrate_codex_official_history_to_unified_bucket()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    if let Some(reason) = &outcome.skipped_reason {
+        log::debug!("○ Codex official history manual unify migration skipped: {reason}");
+    } else {
+        log::info!(
+            "✓ Codex official history manual unify migration completed: jsonl_files={}, state_rows={}",
+            outcome.migrated_jsonl_files,
+            outcome.migrated_state_rows
+        );
+    }
+
+    Ok(CodexUnifyHistoryMigrationResult {
+        migrated_jsonl_files: outcome.migrated_jsonl_files,
+        migrated_state_rows: outcome.migrated_state_rows,
+        skipped_reason: outcome.skipped_reason,
+    })
 }
 
 /// 按迁移备份账本把当时迁入共享桶的官方会话还原回 "openai" 桶。
@@ -191,7 +234,7 @@ pub struct CodexAppRestartResult {
     pub app_path: Option<String>,
 }
 
-/// 重启外部 Codex.app，而不是重启 Codex Switch 自身。
+/// 重启外部 Codex.app，而不是重启 CodexSwitch 自身。
 #[tauri::command]
 pub async fn restart_codex_app() -> Result<CodexAppRestartResult, String> {
     restart_codex_app_impl().await

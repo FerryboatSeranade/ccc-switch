@@ -20,7 +20,7 @@ body:
 
   - type: input
     attributes:
-      label: Codex Switch Version / 版本号
+      label: CodexSwitch Version / 版本号
       description: |
         See the Settings page in the app.
         查看应用设置页面中的版本号。

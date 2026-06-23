@@ -19,6 +19,7 @@ import {
   Loader2,
   RotateCcw,
   Search,
+  Shuffle,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -212,6 +213,8 @@ export function ProviderList({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isRestartingApp, setIsRestartingApp] = useState(false);
   const [isSavingUnifyHistory, setIsSavingUnifyHistory] = useState(false);
+  const [isMigratingUnifiedHistory, setIsMigratingUnifiedHistory] =
+    useState(false);
   const [showUnifyEnableConfirm, setShowUnifyEnableConfirm] = useState(false);
   const [showUnifyDisableConfirm, setShowUnifyDisableConfirm] =
     useState(false);
@@ -503,6 +506,68 @@ export function ProviderList({
     [saveUnifyCodexHistory, t],
   );
 
+  const handleMigrateUnifiedHistory = useCallback(async () => {
+    if (
+      isMigratingUnifiedHistory ||
+      isSavingUnifyHistory ||
+      !unifyCodexSessionHistory
+    ) {
+      return;
+    }
+
+    setIsMigratingUnifiedHistory(true);
+    toast.info(
+      t("provider.unifyHistoryMigrationStarting", {
+        defaultValue: "正在同步 Codex 历史到统一桶...",
+      }),
+    );
+    try {
+      const result = await settingsApi.migrateCodexUnifiedHistory();
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+
+      if (result.skippedReason) {
+        const messageKey =
+          result.skippedReason === "already_migrated"
+            ? "provider.unifyHistoryMigrationAlreadyDone"
+            : result.skippedReason === "live_not_unified"
+              ? "provider.unifyHistoryMigrationLiveNotUnified"
+              : result.skippedReason === "unify_toggle_off"
+                ? "provider.unifyHistoryMigrationToggleOff"
+                : "provider.unifyHistoryMigrationSkipped";
+        toast.info(
+          t(messageKey, {
+            reason: result.skippedReason,
+            defaultValue: `同步已跳过：${result.skippedReason}`,
+          }),
+        );
+        return;
+      }
+
+      toast.success(
+        t("provider.unifyHistoryMigrationCompleted", {
+          files: result.migratedJsonlFiles,
+          rows: result.migratedStateRows,
+          defaultValue: `已同步历史：${result.migratedJsonlFiles} 个会话文件、${result.migratedStateRows} 条索引记录`,
+        }),
+      );
+    } catch (error) {
+      console.error("[ProviderList] Failed to migrate unified history", error);
+      toast.error(
+        t("provider.unifyHistoryMigrationFailed", {
+          defaultValue: "同步 Codex 历史到统一桶失败",
+        }),
+      );
+    } finally {
+      setIsMigratingUnifiedHistory(false);
+    }
+  }, [
+    isMigratingUnifiedHistory,
+    isSavingUnifyHistory,
+    queryClient,
+    t,
+    unifyCodexSessionHistory,
+  ]);
+
   const codexQuickSetup =
     appId === "codex" ? (
       <CodexIxQuickSetup
@@ -657,6 +722,55 @@ export function ProviderList({
                   defaultValue:
                     "Use one Codex session history for official and third-party providers",
                 })}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  onClick={handleMigrateUnifiedHistory}
+                  disabled={
+                    !settings ||
+                    !unifyCodexSessionHistory ||
+                    isSavingUnifyHistory ||
+                    isMigratingUnifiedHistory
+                  }
+                  title={t("provider.unifyHistoryMigrationTooltip", {
+                    defaultValue:
+                      "Sync existing Codex history into the unified bucket",
+                  })}
+                  aria-label={t("provider.unifyHistoryMigrationTooltip", {
+                    defaultValue:
+                      "Sync existing Codex history into the unified bucket",
+                  })}
+                >
+                  {isMigratingUnifiedHistory ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Shuffle className="h-3.5 w-3.5" />
+                  )}
+                  {isMigratingUnifiedHistory
+                    ? t("provider.unifyHistoryMigrating", {
+                        defaultValue: "Syncing",
+                      })
+                    : t("provider.unifyHistoryMigration", {
+                        defaultValue: "Sync History",
+                      })}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {unifyCodexSessionHistory
+                  ? t("provider.unifyHistoryMigrationTooltip", {
+                      defaultValue:
+                        "Sync existing Codex history into the unified bucket",
+                    })
+                  : t("provider.unifyHistoryMigrationDisabledTooltip", {
+                      defaultValue:
+                        "Enable unified sessions before syncing history",
+                    })}
               </TooltipContent>
             </Tooltip>
             <Tooltip>

@@ -26,6 +26,13 @@ export interface CodexUnifyHistoryRestoreResult {
   skippedReason?: string;
 }
 
+export interface CodexUnifyHistoryMigrationResult {
+  migratedJsonlFiles: number;
+  migratedStateRows: number;
+  /** 迁移被跳过的原因（如开关关闭、live 尚未统一）；存在时不应报成功 */
+  skippedReason?: string;
+}
+
 export interface WebDavSyncResult {
   status: string;
 }
@@ -47,6 +54,11 @@ export const settingsApi = {
   /** 按迁移备份账本把当时迁入共享桶的官方会话还原回 openai 桶（幂等） */
   async restoreCodexUnifiedHistory(): Promise<CodexUnifyHistoryRestoreResult> {
     return await invoke("restore_codex_unified_history");
+  },
+
+  /** 手动把既有官方 Codex 会话历史迁入统一 custom 桶 */
+  async migrateCodexUnifiedHistory(): Promise<CodexUnifyHistoryMigrationResult> {
+    return await invoke("migrate_codex_unified_history");
   },
 
   async restart(): Promise<boolean> {

@@ -1,4 +1,4 @@
-//! Deep link import functionality for Codex Switch
+//! Deep link import functionality for CodexSwitch
 //!
 //! This module implements the cccswitch:// protocol for importing configurations
 //! via deep links. Supports importing:

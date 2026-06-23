@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,60 @@ const IX_PROVIDER_ID = "default";
 const IX_PROVIDER_NAME = "default";
 const IX_CODE_BASE_URL = "https://code.gogoais.com";
 const IX_KEY_ENDPOINT = "https://x-api.gogoais.com/api/public/codex-key";
+const IX_CREDENTIALS_STORAGE_KEY = "codexSwitch:ixCredentials";
+const IX_DEFAULT_PASSWORD = "123456";
+
+type IxSavedCredentials = {
+  account: string;
+  password: string;
+};
+
+function loadIxSavedCredentials(): IxSavedCredentials {
+  const fallback: IxSavedCredentials = {
+    account: "",
+    password: IX_DEFAULT_PASSWORD,
+  };
+
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(IX_CREDENTIALS_STORAGE_KEY);
+    if (!raw) {
+      return fallback;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<IxSavedCredentials>;
+    return {
+      account: typeof parsed.account === "string" ? parsed.account : "",
+      password:
+        typeof parsed.password === "string"
+          ? parsed.password
+          : IX_DEFAULT_PASSWORD,
+    };
+  } catch (error) {
+    console.warn("[IX] Failed to load saved credentials:", error);
+    return fallback;
+  }
+}
+
+function saveIxCredentials(credentials: IxSavedCredentials): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    window.localStorage.setItem(
+      IX_CREDENTIALS_STORAGE_KEY,
+      JSON.stringify(credentials),
+    );
+    return true;
+  } catch (error) {
+    console.warn("[IX] Failed to save credentials:", error);
+    return false;
+  }
+}
 
 const IX_USAGE_SCRIPT_CODE = `(() => {
   const timezone = "Asia/Shanghai";
@@ -298,12 +352,41 @@ export function CodexIxQuickSetup({
   providers,
   onConfigured,
 }: CodexIxQuickSetupProps) {
-  const [account, setAccount] = useState("");
-  const [password, setPassword] = useState("");
+  const [credentials, setCredentials] = useState<IxSavedCredentials>(() =>
+    loadIxSavedCredentials(),
+  );
+  const [showPassword, setShowPassword] = useState(false);
+  const [credentialsSaveStatus, setCredentialsSaveStatus] = useState<
+    "saved" | "saving" | "failed"
+  >("saved");
   const [relayApiKey, setRelayApiKey] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isApplyingRelayKey, setIsApplyingRelayKey] = useState(false);
   const [isSyncingUsageScript, setIsSyncingUsageScript] = useState(false);
+  const account = credentials.account;
+  const password = credentials.password;
+  const credentialsSaveMessage =
+    credentialsSaveStatus === "saving"
+      ? " 正在保存..."
+      : credentialsSaveStatus === "failed"
+        ? " 自动保存失败。"
+        : " 已保存。";
+
+  useEffect(() => {
+    setCredentialsSaveStatus("saving");
+    const timer = window.setTimeout(() => {
+      setCredentialsSaveStatus(
+        saveIxCredentials({
+          account,
+          password,
+        })
+          ? "saved"
+          : "failed",
+      );
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [account, password]);
 
   useEffect(() => {
     const provider = providers[IX_PROVIDER_ID];
@@ -369,7 +452,6 @@ export function CodexIxQuickSetup({
       }
       await providersApi.switch(IX_PROVIDER_ID, "codex");
 
-      setPassword("");
       toast.success("已获取并配置 ix Codex 环境，用量查询已启用");
       onConfigured?.();
     } catch (err) {
@@ -446,27 +528,62 @@ export function CodexIxQuickSetup({
               <Input
                 id="ix-account"
                 value={account}
-                onChange={(event) => setAccount(event.target.value)}
+                onChange={(event) =>
+                  setCredentials((current) => ({
+                    ...current,
+                    account: event.target.value,
+                  }))
+                }
                 placeholder="请输入账号"
                 autoComplete="username"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="ix-password">密码</Label>
-              <Input
-                id="ix-password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="请输入密码"
-                autoComplete="current-password"
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    void handleSetup();
+              <div className="relative">
+                <Input
+                  id="ix-password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) =>
+                    setCredentials((current) => ({
+                      ...current,
+                      password: event.target.value,
+                    }))
                   }
-                }}
-              />
+                  placeholder="请输入密码"
+                  autoComplete="current-password"
+                  className="pr-10"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleSetup();
+                    }
+                  }}
+                />
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((value) => !value)}
+                        className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                        title={showPassword ? "隐藏密码" : "显示密码"}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {showPassword ? "隐藏已保存密码" : "查看已保存密码"}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
             </div>
             <TooltipProvider delayDuration={300}>
               <Tooltip>
@@ -493,7 +610,8 @@ export function CodexIxQuickSetup({
             </TooltipProvider>
           </div>
           <p className="text-xs text-muted-foreground">
-            获取后自动配置 default 环境、切换到 https://code.gogoais.com/v1，并自动启用用量查询；密码不会保存。
+            账号密码会自动保存在本机；获取后自动配置 default 环境、切换到 https://code.gogoais.com/v1，并自动启用用量查询。
+            {credentialsSaveMessage}
           </p>
         </TabsContent>
 

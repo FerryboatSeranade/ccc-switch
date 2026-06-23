@@ -417,7 +417,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
 
   const handleCheckUpdate = useCallback(async () => {
     if (hasUpdate) {
-      if (isPortable) {
+      if (isPortable || updateInfo?.source === "github-release") {
         try {
           await settingsApi.checkUpdates();
         } catch (error) {
@@ -462,7 +462,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
       console.error("[AboutSection] Check update failed", error);
       toast.error(t("settings.checkUpdateFailed"));
     }
-  }, [checkUpdate, hasUpdate, isPortable, resetDismiss, t]);
+  }, [checkUpdate, hasUpdate, isPortable, resetDismiss, t, updateInfo?.source]);
 
   const handleCopyInstallCommands = useCallback(async () => {
     try {
@@ -800,9 +800,9 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
           <div className="flex items-center gap-8">
             <div className="flex flex-col items-center gap-2">
               <div className="flex items-center gap-2">
-                <img src={appIcon} alt="Codex Switch" className="h-5 w-5" />
+                <img src={appIcon} alt="CodexSwitch" className="h-5 w-5" />
                 <h4 className="text-lg font-semibold text-foreground">
-                  Codex Switch
+                  CodexSwitch
                 </h4>
               </div>
               <div className="flex items-center gap-2">
