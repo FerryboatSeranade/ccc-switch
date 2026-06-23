@@ -8,6 +8,7 @@ import { UsageData, Provider } from "@/types";
 import { TierBadge } from "@/components/SubscriptionQuotaFooter";
 import { copyText } from "@/lib/clipboard";
 import type { QuotaTier } from "@/types/subscription";
+import { extractCodexExperimentalBearerToken } from "@/utils/providerConfigUtils";
 
 interface UsageFooterProps {
   provider: Provider;
@@ -159,6 +160,27 @@ function maskApiKey(value: string | undefined): string {
   if (!value) return "sk-...";
   if (value.length <= 12) return value;
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function resolveProviderApiKey(provider: Provider): string {
+  const config = provider.settingsConfig ?? {};
+  const candidates = [
+    config.auth?.OPENAI_API_KEY,
+    config.env?.OPENAI_API_KEY,
+    config.apiKey,
+    config.api_key,
+    extractCodexExperimentalBearerToken(
+      typeof config.config === "string" ? config.config : "",
+    ),
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return "";
 }
 
 const UsageFooter: React.FC<UsageFooterProps> = ({
@@ -451,7 +473,7 @@ const IxGogoaiUsageTable: React.FC<{
   onRefresh: () => void;
 }> = ({ provider, meta, loading, lastQueriedAt, now, onRefresh }) => {
   const { t } = useTranslation();
-  const apiKey = provider.settingsConfig?.auth?.OPENAI_API_KEY;
+  const apiKey = resolveProviderApiKey(provider);
   const used = isFiniteNumber(meta.quotaUsed) ? meta.quotaUsed : 0;
   const total = isFiniteNumber(meta.quotaLimit) ? meta.quotaLimit : 0;
   const remaining = isFiniteNumber(meta.quotaRemaining)

@@ -118,9 +118,23 @@ async fn request_gogoais_codex_key(
         ));
     }
 
-    let api_key = string_at(&value, &["data", "codex", "api_key"])
-        .or_else(|| string_at(&value, &["data", "codex", "sk"]))
-        .ok_or_else(|| format!("{endpoint} -> gogoais 响应里没有 data.codex.api_key"))?;
+    let api_key = first_string_at(
+        &value,
+        &[
+            &["data", "codex", "api_key"],
+            &["data", "codex", "sk"],
+            &["data", "codex", "key"],
+            &["data", "api_key"],
+            &["data", "sk"],
+            &["data", "key"],
+            &["api_key"],
+            &["sk"],
+            &["key"],
+        ],
+    )
+    .ok_or_else(|| {
+        format!("{endpoint} -> gogoais 响应里没有 data.codex.api_key 或兼容 API Key 字段")
+    })?;
 
     if api_key.trim().is_empty() {
         return Err(format!("{endpoint} -> gogoais 返回了空 API Key"));
@@ -128,8 +142,22 @@ async fn request_gogoais_codex_key(
 
     Ok(GogoaisCodexKey {
         api_key,
-        base_url: string_at(&value, &["data", "codex", "base_url"]),
-        openai_base_url: string_at(&value, &["data", "codex", "openai_base_url"]),
+        base_url: first_string_at(
+            &value,
+            &[
+                &["data", "codex", "base_url"],
+                &["data", "base_url"],
+                &["base_url"],
+            ],
+        ),
+        openai_base_url: first_string_at(
+            &value,
+            &[
+                &["data", "codex", "openai_base_url"],
+                &["data", "openai_base_url"],
+                &["openai_base_url"],
+            ],
+        ),
     })
 }
 
@@ -169,6 +197,10 @@ fn string_at(value: &Value, path: &[&str]) -> Option<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(ToString::to_string)
+}
+
+fn first_string_at(value: &Value, paths: &[&[&str]]) -> Option<String> {
+    paths.iter().find_map(|path| string_at(value, path))
 }
 
 fn gogoais_error_message(status: reqwest::StatusCode, value: Option<&Value>) -> String {
@@ -267,6 +299,22 @@ mod tests {
         assert_eq!(
             string_at(&value, &["data", "codex", "api_key"]),
             Some("sk-gogoais-test-token".to_string())
+        );
+    }
+
+    #[test]
+    fn first_string_at_reads_compatible_key_paths() {
+        let value = json!({
+            "data": {
+                "api_key": " sk-gogoais-compatible-token "
+            }
+        });
+        assert_eq!(
+            first_string_at(
+                &value,
+                &[&["data", "codex", "api_key"], &["data", "api_key"]]
+            ),
+            Some("sk-gogoais-compatible-token".to_string())
         );
     }
 

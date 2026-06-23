@@ -15,6 +15,10 @@ import { codexGogoaisApi } from "@/lib/api/codexGogoais";
 import { providersApi } from "@/lib/api/providers";
 import { createUsageScript, type Provider } from "@/types";
 import { TEMPLATE_TYPES } from "@/config/constants";
+import {
+  extractCodexBaseUrl,
+  extractCodexExperimentalBearerToken,
+} from "@/utils/providerConfigUtils";
 
 const IX_PROVIDER_ID = "default";
 const IX_PROVIDER_NAME = "default";
@@ -275,7 +279,33 @@ const IX_USAGE_SCRIPT_CODE = `(() => {
   };
 })()`;
 
-function buildCodexConfig(baseUrl: string): string {
+function escapeTomlBasicString(value: string): string {
+  return value.replace(/["\\\u0000-\u001f]/g, (ch) => {
+    switch (ch) {
+      case '"':
+        return '\\"';
+      case "\\":
+        return "\\\\";
+      case "\b":
+        return "\\b";
+      case "\t":
+        return "\\t";
+      case "\n":
+        return "\\n";
+      case "\f":
+        return "\\f";
+      case "\r":
+        return "\\r";
+      default:
+        return `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
+    }
+  });
+}
+
+function buildCodexConfig(baseUrl: string, apiKey: string): string {
+  const escapedBaseUrl = escapeTomlBasicString(baseUrl);
+  const escapedApiKey = escapeTomlBasicString(apiKey);
+
   return `model_provider = "custom"
 model = "gpt-5.5"
 model_reasoning_effort = "high"
@@ -283,9 +313,10 @@ disable_response_storage = true
 
 [model_providers.custom]
 name = "GogoAI"
-base_url = "${baseUrl}"
+base_url = "${escapedBaseUrl}"
 wire_api = "responses"
-requires_openai_auth = true`;
+requires_openai_auth = true
+experimental_bearer_token = "${escapedApiKey}"`;
 }
 
 function codexOpenaiBaseUrl(raw: string): string {
@@ -302,6 +333,7 @@ function createIxProvider(
   existingProvider?: Provider,
 ): Provider {
   const usageScript = createIxUsageScript();
+  const config = buildCodexConfig(baseUrl, apiKey);
 
   return {
     ...existingProvider,
@@ -312,10 +344,14 @@ function createIxProvider(
     icon: "default",
     iconColor: "#6B7280",
     settingsConfig: {
+      apiKey,
       auth: {
         OPENAI_API_KEY: apiKey,
       },
-      config: buildCodexConfig(baseUrl),
+      env: {
+        OPENAI_API_KEY: apiKey,
+      },
+      config,
     },
     notes: existingProvider?.notes?.startsWith("IX 账号自动配置")
       ? undefined
@@ -332,6 +368,67 @@ function createIxProvider(
   };
 }
 
+function mergeIxProviderDefaults(provider: Provider): Provider {
+  const apiKey = resolveIxProviderApiKey(provider);
+  const currentConfig =
+    typeof provider.settingsConfig?.config === "string"
+      ? provider.settingsConfig.config
+      : "";
+  const baseUrl = codexOpenaiBaseUrl(
+    extractCodexBaseUrl(currentConfig) || IX_CODE_BASE_URL,
+  );
+  const settingsConfig = apiKey
+    ? {
+        ...(provider.settingsConfig ?? {}),
+        apiKey,
+        auth: {
+          ...(provider.settingsConfig?.auth ?? {}),
+          OPENAI_API_KEY: apiKey,
+        },
+        env: {
+          ...(provider.settingsConfig?.env ?? {}),
+          OPENAI_API_KEY: apiKey,
+        },
+        config: currentConfig || buildCodexConfig(baseUrl, apiKey),
+      }
+    : (provider.settingsConfig ?? {});
+
+  return {
+    ...provider,
+    websiteUrl: provider.websiteUrl || IX_CODE_BASE_URL,
+    category: provider.category || "third_party",
+    settingsConfig,
+    meta: {
+      ...(provider.meta ?? {}),
+      providerType: "ix_gogoai",
+      apiFormat: "openai_responses",
+      endpointAutoSelect: false,
+      usage_script: createIxUsageScript(),
+    },
+  };
+}
+
+function resolveIxProviderApiKey(provider: Provider): string {
+  const config = provider.settingsConfig ?? {};
+  const candidates = [
+    config.auth?.OPENAI_API_KEY,
+    config.env?.OPENAI_API_KEY,
+    config.apiKey,
+    config.api_key,
+    extractCodexExperimentalBearerToken(
+      typeof config.config === "string" ? config.config : "",
+    ),
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return "";
+}
+
 function createIxUsageScript() {
   return createUsageScript({
     enabled: true,
@@ -345,7 +442,7 @@ function createIxUsageScript() {
 
 interface CodexIxQuickSetupProps {
   providers: Record<string, Provider>;
-  onConfigured?: () => void;
+  onConfigured?: () => void | Promise<void>;
 }
 
 export function CodexIxQuickSetup({
@@ -395,7 +492,14 @@ export function CodexIxQuickSetup({
     }
 
     const script = provider.meta?.usage_script;
+    const apiKey = resolveIxProviderApiKey(provider);
+    const hasCanonicalKey =
+      !apiKey ||
+      (provider.settingsConfig?.auth?.OPENAI_API_KEY === apiKey &&
+        provider.settingsConfig?.env?.OPENAI_API_KEY === apiKey &&
+        provider.settingsConfig?.apiKey === apiKey);
     if (
+      hasCanonicalKey &&
       script?.enabled &&
       script.code === IX_USAGE_SCRIPT_CODE &&
       script.autoQueryInterval === 30
@@ -404,14 +508,7 @@ export function CodexIxQuickSetup({
     }
 
     setIsSyncingUsageScript(true);
-    const nextProvider: Provider = {
-      ...provider,
-      meta: {
-        ...(provider.meta ?? {}),
-        providerType: "ix_gogoai",
-        usage_script: createIxUsageScript(),
-      },
-    };
+    const nextProvider = mergeIxProviderDefaults(provider);
 
     providersApi
       .update(nextProvider, "codex", IX_PROVIDER_ID)
@@ -453,7 +550,7 @@ export function CodexIxQuickSetup({
       await providersApi.switch(IX_PROVIDER_ID, "codex");
 
       toast.success("已获取并配置 ix Codex 环境，用量查询已启用");
-      onConfigured?.();
+      await onConfigured?.();
     } catch (err) {
       console.warn("[IX] Codex quick setup failed:", err);
       toast.error(
@@ -494,7 +591,7 @@ export function CodexIxQuickSetup({
 
       setRelayApiKey("");
       toast.success("中转 API Key 已写入 default 环境并生效");
-      onConfigured?.();
+      await onConfigured?.();
     } catch (err) {
       console.warn("[IX] Codex relay API key setup failed:", err);
       toast.error(

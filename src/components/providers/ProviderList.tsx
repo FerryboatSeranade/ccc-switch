@@ -30,6 +30,8 @@ import type { AppId } from "@/lib/api";
 import { providersApi } from "@/lib/api/providers";
 import { settingsApi } from "@/lib/api/settings";
 import { useSettingsQuery } from "@/lib/query";
+import { subscriptionKeys } from "@/lib/query/subscription";
+import { usageKeys } from "@/lib/query/usage";
 import { useDragSort } from "@/hooks/useDragSort";
 import {
   useOpenClawLiveProviderIds,
@@ -375,8 +377,13 @@ export function ProviderList({
     return messages;
   }, [appId, claudeDesktopStatus, t]);
 
-  const handleCodexQuickConfigured = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+  const handleCodexQuickConfigured = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["providers", appId] }),
+      queryClient.invalidateQueries({ queryKey: usageKeys.script("default", appId) }),
+      queryClient.invalidateQueries({ queryKey: subscriptionKeys.quota(appId) }),
+      queryClient.invalidateQueries({ queryKey: ["codex_oauth", "quota"] }),
+    ]);
     onRefresh?.();
   }, [appId, onRefresh, queryClient]);
 
