@@ -69,6 +69,7 @@ export const settingsApi = {
     wasRunning: boolean;
     launched: boolean;
     appPath?: string;
+    appId?: string;
   }> {
     return await invoke("restart_codex_app");
   },

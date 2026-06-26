@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "ccc-switch"
-version = "3.16.7"
+version = "3.16.8"
 dependencies = [
  "anyhow",
  "arboard",
@@ -747,6 +747,7 @@ dependencies = [
  "bytes",
  "chrono",
  "dirs 5.0.1",
+ "encoding_rs",
  "flate2",
  "futures",
  "hmac",

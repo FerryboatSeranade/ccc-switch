@@ -405,10 +405,19 @@ export function ProviderList({
       );
     } catch (error) {
       console.error("[ProviderList] Failed to restart Codex App", error);
+      const message =
+        typeof error === "string"
+          ? error
+          : error instanceof Error
+            ? error.message
+            : t("provider.restartAppFailed", {
+                defaultValue: "Failed to restart Codex App",
+              });
       toast.error(
-        t("provider.restartAppFailed", {
-          defaultValue: "Failed to restart Codex App",
-        }),
+        message ||
+          t("provider.restartAppFailed", {
+            defaultValue: "Failed to restart Codex App",
+          }),
       );
     } finally {
       setIsRestartingApp(false);

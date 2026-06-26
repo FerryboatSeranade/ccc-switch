@@ -1,7 +1,14 @@
 #![allow(non_snake_case)]
 
+#[cfg(target_os = "windows")]
+use encoding_rs::GBK;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 fn merge_settings_for_save(
     mut incoming: crate::settings::AppSettings,
@@ -232,6 +239,8 @@ pub struct CodexAppRestartResult {
     pub launched: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
 }
 
 /// 重启外部 Codex.app，而不是重启 CodexSwitch 自身。
@@ -295,6 +304,7 @@ fn restart_codex_app_macos() -> Result<CodexAppRestartResult, String> {
         was_running,
         launched: true,
         app_path: app_path.map(|path| path.to_string_lossy().to_string()),
+        app_id: None,
     })
 }
 
@@ -458,7 +468,718 @@ fn launch_codex_app(app_path: Option<&std::path::Path>) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+async fn restart_codex_app_impl() -> Result<CodexAppRestartResult, String> {
+    tauri::async_runtime::spawn_blocking(restart_codex_app_windows)
+        .await
+        .map_err(|e| format!("重启 Codex App 任务失败: {e}"))?
+}
+
+#[cfg(target_os = "windows")]
+fn restart_codex_app_windows() -> Result<CodexAppRestartResult, String> {
+    let launch_target = resolve_windows_codex_launch_target()?;
+    let was_running = codex_windows_process_exists().unwrap_or(false);
+
+    if was_running {
+        quit_codex_app_windows()?;
+        match wait_for_windows_codex_process_state(false, std::time::Duration::from_secs(10)) {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(
+                    "等待 Windows Codex App 退出超时，请手动关闭 Codex App 后重试。".to_string(),
+                );
+            }
+            Err(err) => {
+                log::warn!("已请求关闭 Windows Codex App，但退出后进程检测失败: {err}");
+            }
+        }
+    }
+
+    start_codex_app_windows(&launch_target)?;
+    match wait_for_windows_codex_process_state(true, std::time::Duration::from_secs(8)) {
+        Ok(true) => {}
+        Ok(false) => {
+            log::warn!(
+                "已请求启动 Windows Codex App（{}），但短时间内没有检测到 Codex.exe 进程",
+                launch_target.label()
+            );
+        }
+        Err(err) => {
+            log::warn!(
+                "已请求启动 Windows Codex App（{}），但启动后进程检测失败: {err}",
+                launch_target.label()
+            );
+        }
+    }
+
+    Ok(CodexAppRestartResult {
+        was_running,
+        launched: true,
+        app_path: launch_target.app_path(),
+        app_id: launch_target.app_id(),
+    })
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone)]
+enum WindowsCodexLaunchTarget {
+    AppId(String),
+    ExecutablePath(std::path::PathBuf),
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsCodexLaunchTarget {
+    fn app_id(&self) -> Option<String> {
+        match self {
+            Self::AppId(app_id) => Some(app_id.clone()),
+            Self::ExecutablePath(_) => None,
+        }
+    }
+
+    fn app_path(&self) -> Option<String> {
+        match self {
+            Self::AppId(_) => None,
+            Self::ExecutablePath(path) => Some(path.to_string_lossy().to_string()),
+        }
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Self::AppId(app_id) => app_id.clone(),
+            Self::ExecutablePath(path) => path.to_string_lossy().to_string(),
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_windows_codex_launch_target() -> Result<WindowsCodexLaunchTarget, String> {
+    let mut failures = Vec::new();
+
+    match windows_codex_app_id() {
+        Ok(app_id) => return Ok(WindowsCodexLaunchTarget::AppId(app_id)),
+        Err(err) => failures.push(err),
+    }
+
+    if let Some(path) = windows_codex_app_alias_path() {
+        return Ok(WindowsCodexLaunchTarget::ExecutablePath(path));
+    }
+
+    Err(format!(
+        "未能定位 Windows Codex App。请先安装 Codex App，或通过安装功能自动安装。详细：{}",
+        failures.join("；")
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_codex_app_id() -> Result<String, String> {
+    let mut failures = Vec::new();
+
+    match windows_codex_app_id_from_powershell() {
+        Ok(app_id) => return Ok(app_id),
+        Err(err) => failures.push(format!("PowerShell 查询失败：{err}")),
+    }
+
+    match windows_codex_app_id_from_manifest_dirs() {
+        Ok(app_id) => return Ok(app_id),
+        Err(err) => failures.push(format!("WindowsApps manifest 查询失败：{err}")),
+    }
+
+    Err(failures.join("；"))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_codex_app_id_from_powershell() -> Result<String, String> {
+    let script = r#"
+$ErrorActionPreference = "Stop"
+
+function Test-IsSwitcher($entry) {
+  $name = [string]$entry.Name
+  $appId = [string]$entry.AppID
+  return (
+    $name -match "(?i)CCC Switch|CC Switch|Codex Switch|Profile Switcher|Codex Account Switcher|Account Switcher|切号器" -or
+    $appId -match "(?i)ccc-switch|cc-switch|codex-switch|profile-switcher|codex-account-switcher|com\.local"
+  )
+}
+
+$startApps = @(Get-StartApps | Where-Object { -not (Test-IsSwitcher $_) })
+$packages = @(Get-AppxPackage -Name "OpenAI.Codex" -ErrorAction SilentlyContinue)
+if ($packages.Count -eq 0) {
+  $packages = @(Get-AppxPackage -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Name -eq "OpenAI.Codex" -or
+      $_.PackageFamilyName -like "OpenAI.Codex_*"
+    })
+}
+
+foreach ($package in $packages) {
+  $app = $startApps |
+    Where-Object { $_.AppID -like "$($package.PackageFamilyName)!*" } |
+    Select-Object -First 1
+  if ($app) {
+    $app.AppID
+    exit 0
+  }
+}
+
+$app = $startApps |
+  Where-Object {
+    $_.Name -eq "Codex" -and (
+      $_.AppID -match "(?i)^OpenAI\.Codex_" -or
+      $_.AppID -match "(?i)9PLM9XGG6VKS"
+    )
+  } |
+  Select-Object -First 1
+
+if (-not $app) {
+  $app = $startApps |
+    Where-Object {
+      $_.Name -eq "Codex" -and
+      $_.AppID -match "!" -and
+      $_.AppID -notmatch "(?i)switcher|account-switcher|codex-account-switcher|ccc-switch|cc-switch|codex-switch|com\.local"
+    } |
+    Select-Object -First 1
+}
+
+if (-not $app) { exit 1 }
+$app.AppID
+"#;
+    let output = windows_powershell_stdout(script)?;
+    output
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "未能从 Windows 开始菜单读取 Codex AppID".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_codex_app_id_from_manifest_dirs() -> Result<String, String> {
+    let mut roots = Vec::new();
+    if let Some(program_files) =
+        std::env::var_os("ProgramW6432").or_else(|| std::env::var_os("ProgramFiles"))
+    {
+        roots.push(std::path::PathBuf::from(program_files).join("WindowsApps"));
+    }
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        roots.push(
+            std::path::PathBuf::from(local_app_data)
+                .join("Microsoft")
+                .join("WindowsApps"),
+        );
+    }
+
+    let mut failures = Vec::new();
+    for apps_root in roots {
+        let entries = match std::fs::read_dir(&apps_root) {
+            Ok(entries) => entries,
+            Err(err) => {
+                failures.push(format!("读取 {} 失败：{err}", apps_root.display()));
+                continue;
+            }
+        };
+
+        for entry in entries.flatten() {
+            let package_dir = entry.path();
+            if !package_dir.is_dir() {
+                continue;
+            }
+
+            let Some(dir_name) = package_dir.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !dir_name.to_ascii_lowercase().starts_with("openai.codex_") {
+                continue;
+            }
+
+            let manifest_path = package_dir.join("AppxManifest.xml");
+            let Ok(manifest) = std::fs::read_to_string(&manifest_path) else {
+                continue;
+            };
+            let Some(application_id) = extract_windows_appx_application_id(&manifest) else {
+                continue;
+            };
+            return Ok(format!("{dir_name}!{application_id}"));
+        }
+    }
+
+    Err(if failures.is_empty() {
+        "未在 WindowsApps manifest 中找到 OpenAI.Codex AppID".to_string()
+    } else {
+        format!(
+            "未在 WindowsApps manifest 中找到 OpenAI.Codex AppID；{}",
+            failures.join("；")
+        )
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn extract_windows_appx_application_id(manifest: &str) -> Option<String> {
+    let application_pos = manifest.find("<Application")?;
+    let id_pos = manifest[application_pos..].find("Id=")? + application_pos;
+    let after_id = &manifest[id_pos + "Id=".len()..];
+    let quote = after_id.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let rest = &after_id[quote.len_utf8()..];
+    let end = rest.find(quote)?;
+    let id = rest[..end].trim();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_codex_app_alias_path() -> Option<std::path::PathBuf> {
+    let local_app_data = std::env::var_os("LOCALAPPDATA")?;
+    let candidate = std::path::PathBuf::from(local_app_data)
+        .join("Microsoft")
+        .join("WindowsApps")
+        .join("Codex.exe");
+    if candidate.exists() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_codex_app_process_ids() -> Result<Vec<String>, String> {
+    let mut failures = Vec::new();
+
+    match windows_codex_app_process_ids_from_powershell() {
+        Ok(process_ids) => return Ok(process_ids),
+        Err(err) => failures.push(format!("PowerShell 查询失败：{err}")),
+    }
+
+    match windows_codex_app_process_ids_from_tasklist() {
+        Ok(process_ids) => return Ok(process_ids),
+        Err(err) => failures.push(format!("tasklist 查询失败：{err}")),
+    }
+
+    Err(failures.join("；"))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_codex_app_process_ids_from_powershell() -> Result<Vec<String>, String> {
+    let script = r#"
+$ErrorActionPreference = "Stop"
+$processes = Get-CimInstance Win32_Process -Filter "Name = 'Codex.exe'" |
+  Where-Object {
+    ($_.ExecutablePath -and ($_.ExecutablePath -match "(?i)\\WindowsApps\\" -or $_.ExecutablePath -match "(?i)\\Programs\\Codex\\" -or $_.ExecutablePath -match "(?i)Codex App")) -or
+    ($_.CommandLine -and ($_.CommandLine -match "(?i)\\WindowsApps\\" -or $_.CommandLine -match "(?i)Codex App" -or $_.CommandLine -match "(?i)ms-appx"))
+  } |
+  Select-Object -ExpandProperty ProcessId
+$processes
+"#;
+    let output = windows_powershell_stdout(script)?;
+    Ok(output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_codex_app_process_ids_from_tasklist() -> Result<Vec<String>, String> {
+    let output = windows_command_stdout(
+        "tasklist",
+        &["/FI", "IMAGENAME eq Codex.exe", "/FO", "CSV", "/NH"],
+    )?;
+    Ok(output
+        .lines()
+        .filter_map(|line| parse_tasklist_csv_pid(line))
+        .collect())
+}
+
+#[cfg(target_os = "windows")]
+fn parse_tasklist_csv_pid(line: &str) -> Option<String> {
+    let columns = parse_windows_csv_line(line);
+    if columns.len() < 2 {
+        return None;
+    }
+    if !columns[0].eq_ignore_ascii_case("Codex.exe") {
+        return None;
+    }
+    let pid = columns[1].trim();
+    if pid.chars().all(|ch| ch.is_ascii_digit()) {
+        Some(pid.to_string())
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn parse_windows_csv_line(line: &str) -> Vec<String> {
+    let mut columns = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if in_quotes && chars.peek() == Some(&'"') => {
+                current.push('"');
+                chars.next();
+            }
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                columns.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    columns.push(current.trim().to_string());
+    columns
+}
+
+#[cfg(target_os = "windows")]
+fn codex_windows_process_exists() -> Result<bool, String> {
+    windows_codex_app_process_ids().map(|ids| !ids.is_empty())
+}
+
+#[cfg(target_os = "windows")]
+fn wait_for_windows_codex_process_state(
+    expected: bool,
+    timeout: std::time::Duration,
+) -> Result<bool, String> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if codex_windows_process_exists()? == expected {
+            return Ok(true);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+
+    Ok(false)
+}
+
+#[cfg(target_os = "windows")]
+fn quit_codex_app_windows() -> Result<(), String> {
+    let mut failures = Vec::new();
+    let mut any_success = false;
+    let mut access_denied = false;
+
+    match codex_windows_process_exists() {
+        Ok(false) => return Ok(()),
+        Ok(true) => {}
+        Err(err) => failures.push(format!("检测 Codex.exe 进程失败：{err}")),
+    }
+
+    match windows_codex_app_process_ids() {
+        Ok(process_ids) if process_ids.is_empty() => return Ok(()),
+        Ok(process_ids) => {
+            for process_id in process_ids {
+                let close_script = format!(
+                    r#"
+$ErrorActionPreference = "SilentlyContinue"
+$process = Get-Process -Id {} -ErrorAction SilentlyContinue
+if ($process) {{ $process.CloseMainWindow() | Out-Null }}
+Start-Sleep -Milliseconds 900
+"#,
+                    process_id
+                );
+                if let Err(err) = windows_powershell_status(&close_script) {
+                    failures.push(format!("温和关闭 PID {process_id} 失败：{err}"));
+                }
+            }
+        }
+        Err(err) => failures.push(format!("读取 Codex App 进程失败：{err}")),
+    }
+
+    match codex_windows_process_exists() {
+        Ok(false) => return Ok(()),
+        Ok(true) => {}
+        Err(err) => failures.push(format!("温和关闭后检测进程失败：{err}")),
+    }
+
+    match windows_codex_app_process_ids() {
+        Ok(process_ids) if process_ids.is_empty() => return Ok(()),
+        Ok(process_ids) => {
+            for process_id in process_ids {
+                match windows_command_status_detail("taskkill", &["/F", "/T", "/PID", &process_id])
+                {
+                    Ok(()) => any_success = true,
+                    Err(err) => {
+                        any_success = any_success || err.has_successful_termination();
+                        access_denied = access_denied || err.is_access_denied();
+                        failures.push(format!("taskkill PID {process_id} 失败：{}", err.detail()));
+                    }
+                }
+            }
+        }
+        Err(err) => failures.push(format!("读取 Codex App 进程失败：{err}")),
+    }
+    std::thread::sleep(std::time::Duration::from_millis(800));
+
+    match codex_windows_process_exists() {
+        Ok(false) => return Ok(()),
+        Ok(true) => {}
+        Err(err) => failures.push(format!("taskkill 后检测进程失败：{err}")),
+    }
+
+    let script = r#"
+$ErrorActionPreference = "Continue"
+Get-CimInstance Win32_Process -Filter "Name = 'Codex.exe'" |
+  Where-Object {
+    ($_.ExecutablePath -and ($_.ExecutablePath -match "(?i)\\WindowsApps\\" -or $_.ExecutablePath -match "(?i)\\Programs\\Codex\\" -or $_.ExecutablePath -match "(?i)Codex App")) -or
+    ($_.CommandLine -and ($_.CommandLine -match "(?i)\\WindowsApps\\" -or $_.CommandLine -match "(?i)Codex App" -or $_.CommandLine -match "(?i)ms-appx"))
+  } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Continue }
+"#;
+    match windows_powershell_status(script) {
+        Ok(()) => any_success = true,
+        Err(err) => {
+            access_denied = access_denied || text_has_access_denied(&err);
+            failures.push(format!("PowerShell 停止进程失败：{err}"));
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+
+    let final_process_state = codex_windows_process_exists();
+    match final_process_state {
+        Ok(false) => Ok(()),
+        Ok(true) if access_denied => Err(format!(
+            "Codex App 仍在运行，Windows 拒绝当前应用结束部分 Codex 进程。请以管理员身份重启 CCC Switch，或手动关闭 Codex App 后重试。{}",
+            if any_success {
+                "已成功关闭一部分 Codex 子进程，但仍有进程需要更高权限。".to_string()
+            } else {
+                String::new()
+            }
+        )),
+        Ok(true) => Err(format!(
+            "已尝试温和关闭、taskkill 和 PowerShell 停止 Codex App，但 Codex.exe 仍在运行。请手动关闭 Codex App 后重试。{}",
+            if failures.is_empty() {
+                String::new()
+            } else {
+                format!(" 详细：{}", failures.join("；"))
+            }
+        )),
+        Err(err) if any_success => Ok(()),
+        Err(err) => Err(format!(
+            "无法确认 Codex App 是否已关闭：{err}。{}",
+            if failures.is_empty() {
+                "请手动关闭 Codex App 后重试。".to_string()
+            } else {
+                format!("详细：{}", failures.join("；"))
+            }
+        )),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn start_codex_app_windows(target: &WindowsCodexLaunchTarget) -> Result<(), String> {
+    match target {
+        WindowsCodexLaunchTarget::AppId(app_id) => hidden_command("explorer.exe")
+            .arg(format!("shell:AppsFolder\\{app_id}"))
+            .spawn()
+            .map(|_| ())
+            .map_err(|err| format!("未能通过 Windows AppID 启动 Codex App（{app_id}）：{err}")),
+        WindowsCodexLaunchTarget::ExecutablePath(path) => {
+            hidden_command(path).spawn().map(|_| ()).map_err(|err| {
+                format!(
+                    "未能通过 Windows App Execution Alias 启动 Codex App（{}）：{err}",
+                    path.display()
+                )
+            })
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn hidden_command<P>(program: P) -> std::process::Command
+where
+    P: AsRef<std::ffi::OsStr>,
+{
+    let mut command = std::process::Command::new(program);
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug)]
+struct WindowsCommandError {
+    program: String,
+    status: String,
+    stdout: String,
+    stderr: String,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsCommandError {
+    fn detail(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.stdout.trim().is_empty() {
+            parts.push(format!(
+                "stdout: {}",
+                first_non_empty_lines(&self.stdout, 4)
+            ));
+        }
+        if !self.stderr.trim().is_empty() {
+            parts.push(format!(
+                "stderr: {}",
+                first_non_empty_lines(&self.stderr, 4)
+            ));
+        }
+        if parts.is_empty() {
+            format!("{} 退出码异常：{}", self.program, self.status)
+        } else {
+            format!(
+                "{} 退出码异常：{}；{}",
+                self.program,
+                self.status,
+                parts.join("；")
+            )
+        }
+    }
+
+    fn combined_text(&self) -> String {
+        format!("{}\n{}", self.stdout, self.stderr)
+    }
+
+    fn is_access_denied(&self) -> bool {
+        let text = self.combined_text();
+        text_has_access_denied(&text)
+    }
+
+    fn has_successful_termination(&self) -> bool {
+        let text = self.combined_text();
+        let lower = text.to_ascii_lowercase();
+        lower.contains("success") || text.contains("成功") || text.contains("已成功")
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn text_has_access_denied(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("access is denied")
+        || lower.contains("access denied")
+        || text.contains("拒绝访问")
+}
+
+#[cfg(target_os = "windows")]
+fn first_non_empty_lines(text: &str, max_lines: usize) -> String {
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(max_lines)
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        String::new()
+    } else {
+        lines.join(" / ")
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn decode_windows_output(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+    match String::from_utf8(bytes.to_vec()) {
+        Ok(value) => value.trim().to_string(),
+        Err(_) => {
+            let (decoded, _, _) = GBK.decode(bytes);
+            decoded.trim().to_string()
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_command_stdout(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = hidden_command(program)
+        .args(args)
+        .output()
+        .map_err(|err| format!("执行 {program} 失败：{err}"))?;
+    if !output.status.success() {
+        let stderr = decode_windows_output(&output.stderr);
+        return Err(if stderr.is_empty() {
+            format!("{program} 退出码异常：{}", output.status)
+        } else {
+            stderr
+        });
+    }
+    Ok(decode_windows_output(&output.stdout))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_command_status_detail(program: &str, args: &[&str]) -> Result<(), WindowsCommandError> {
+    let output =
+        hidden_command(program)
+            .args(args)
+            .output()
+            .map_err(|err| WindowsCommandError {
+                program: program.to_string(),
+                status: "未启动".to_string(),
+                stdout: String::new(),
+                stderr: format!("执行 {program} 失败：{err}"),
+            })?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(WindowsCommandError {
+        program: program.to_string(),
+        status: output.status.to_string(),
+        stdout: decode_windows_output(&output.stdout),
+        stderr: decode_windows_output(&output.stderr),
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn windows_powershell_script(script: &str) -> String {
+    format!(
+        r#"
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+{script}
+"#
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn windows_powershell_status(script: &str) -> Result<(), String> {
+    let script = windows_powershell_script(script);
+    let args = [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script.as_str(),
+    ];
+    windows_command_status_detail("powershell.exe", &args)
+        .map_err(|err| err.detail())
+        .or_else(|powershell_err| {
+            windows_command_status_detail("pwsh", &args).map_err(|pwsh_err| {
+                format!(
+                    "powershell.exe: {powershell_err}；pwsh: {}",
+                    pwsh_err.detail()
+                )
+            })
+        })
+}
+
+#[cfg(target_os = "windows")]
+fn windows_powershell_stdout(script: &str) -> Result<String, String> {
+    let script = windows_powershell_script(script);
+    let args = [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script.as_str(),
+    ];
+    windows_command_stdout("powershell.exe", &args).or_else(|powershell_err| {
+        windows_command_stdout("pwsh", &args)
+            .map_err(|pwsh_err| format!("powershell.exe: {powershell_err}；pwsh: {pwsh_err}"))
+    })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 async fn restart_codex_app_impl() -> Result<CodexAppRestartResult, String> {
     Err("当前平台暂不支持自动重启 Codex App".to_string())
 }
