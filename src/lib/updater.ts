@@ -76,7 +76,7 @@ async function checkGithubRelease(
   if (!currentVersion) return null;
 
   const response = await fetch(
-    "https://api.github.com/repos/FerryboatSeranade/codex-switch/releases/latest",
+    "https://api.github.com/repos/FerryboatSeranade/ccc-switch/releases/latest",
     {
       headers: {
         Accept: "application/vnd.github+json",

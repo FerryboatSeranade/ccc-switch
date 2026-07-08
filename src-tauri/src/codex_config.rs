@@ -894,7 +894,12 @@ pub fn write_codex_provider_live_with_catalog(
         .map(|text| prepare_codex_config_text_with_model_catalog(settings, text))
         .transpose()?;
 
-    write_codex_live_for_provider(category, auth, prepared_config.as_deref())
+    write_codex_live_for_provider_with_settings(
+        settings,
+        category,
+        auth,
+        prepared_config.as_deref(),
+    )
 }
 
 /// Extract a provider-scoped `experimental_bearer_token` from Codex `config.toml`.
@@ -1219,7 +1224,17 @@ pub fn strip_codex_unified_session_bucket_from_settings(
 ///
 /// 统一会话开关开启时，官方配置在落盘前注入共享的 `custom` 路由
 /// （见 `inject_codex_unified_session_bucket`）。
+#[allow(dead_code)]
 pub fn write_codex_live_for_provider(
+    category: Option<&str>,
+    auth: &Value,
+    config_text: Option<&str>,
+) -> Result<(), AppError> {
+    write_codex_live_for_provider_with_settings(&json!({}), category, auth, config_text)
+}
+
+pub fn write_codex_live_for_provider_with_settings(
+    settings: &Value,
     category: Option<&str>,
     auth: &Value,
     config_text: Option<&str>,
@@ -1234,16 +1249,67 @@ pub fn write_codex_live_for_provider(
         };
     let config_text = unified_official_config.as_deref().or(config_text);
 
+    let should_write_provider_auth_for_compat =
+        should_write_codex_provider_auth_for_compat(settings);
     let should_write_auth = (category == Some("official") && codex_auth_has_login_material(auth))
+        || should_write_provider_auth_for_compat
         || (category != Some("official")
             && !crate::settings::preserve_codex_official_auth_on_switch());
 
     if should_write_auth {
-        write_codex_live_atomic(auth, config_text)
+        let live_config = if should_write_provider_auth_for_compat {
+            Some(prepare_codex_provider_live_config(
+                auth,
+                config_text.unwrap_or(""),
+            )?)
+        } else {
+            config_text.map(str::to_string)
+        };
+        let live_auth = if should_write_provider_auth_for_compat {
+            merge_codex_live_auth_with_provider_key(auth)?
+        } else {
+            auth.clone()
+        };
+        write_codex_live_atomic(&live_auth, live_config.as_deref())
     } else {
         let live_config = prepare_codex_provider_live_config(auth, config_text.unwrap_or(""))?;
         write_codex_live_config_atomic(Some(&live_config))
     }
+}
+
+fn should_write_codex_provider_auth_for_compat(settings: &Value) -> bool {
+    [
+        settings
+            .get("__ccSwitchProviderType")
+            .and_then(Value::as_str),
+        settings
+            .pointer("/meta/providerType")
+            .and_then(Value::as_str),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| value == "ix_gogoai")
+}
+
+fn merge_codex_live_auth_with_provider_key(auth: &Value) -> Result<Value, AppError> {
+    let token = extract_codex_auth_api_key(auth)
+        .ok_or_else(|| AppError::Config("Codex IX/GogoAI 供应商缺少 OPENAI_API_KEY".to_string()))?;
+
+    let mut live_auth = match get_codex_auth_path().exists() {
+        true => read_json_file(&get_codex_auth_path()).unwrap_or_else(|_| json!({})),
+        false => json!({}),
+    };
+    if !live_auth.is_object() {
+        live_auth = json!({});
+    }
+
+    let obj = live_auth.as_object_mut().expect("live_auth is object");
+    obj.insert("OPENAI_API_KEY".to_string(), Value::String(token));
+    if !obj.contains_key("auth_mode") {
+        obj.insert("auth_mode".to_string(), Value::String("apikey".to_string()));
+    }
+
+    Ok(live_auth)
 }
 
 /// Build the live Codex config for provider switching.
@@ -1437,6 +1503,34 @@ pub fn remove_codex_toml_base_url_if(toml_str: &str, predicate: impl Fn(&str) ->
 mod tests {
     use super::*;
     use serde_json::json;
+    use serial_test::serial;
+    use std::env;
+
+    struct TestHome {
+        _dir: tempfile::TempDir,
+        old_test_home: Option<std::ffi::OsString>,
+    }
+
+    impl TestHome {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("create temp home");
+            let old_test_home = env::var_os("CC_SWITCH_TEST_HOME");
+            env::set_var("CC_SWITCH_TEST_HOME", dir.path());
+            Self {
+                _dir: dir,
+                old_test_home,
+            }
+        }
+    }
+
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            match self.old_test_home.take() {
+                Some(value) => env::set_var("CC_SWITCH_TEST_HOME", value),
+                None => env::remove_var("CC_SWITCH_TEST_HOME"),
+            }
+        }
+    }
 
     #[test]
     fn unified_session_bucket_injects_for_empty_official_config() {
@@ -1735,6 +1829,68 @@ model = "gpt-5.4"
                 .and_then(|v| v.as_str()),
             Some("vendor_alpha"),
             "profile provider references should be preserved"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn ix_gogoai_live_write_updates_auth_and_config_for_windows_app_compat() {
+        let _home = TestHome::new();
+        let auth_path = get_codex_auth_path();
+        std::fs::create_dir_all(auth_path.parent().expect("auth parent")).expect("create .codex");
+        write_json_file(
+            &auth_path,
+            &json!({
+                "auth_mode": "chatgpt",
+                "tokens": { "access_token": "oauth-token" }
+            }),
+        )
+        .expect("seed auth");
+
+        write_codex_provider_live_with_catalog(
+            &json!({
+                "__ccSwitchProviderType": "ix_gogoai",
+                "auth": { "OPENAI_API_KEY": "sk-ix" },
+                "config": r#"model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+name = "GogoAI"
+base_url = "https://code.gogoais.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"#
+            }),
+            Some("third_party"),
+            &json!({ "OPENAI_API_KEY": "sk-ix" }),
+            Some(
+                r#"model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+name = "GogoAI"
+base_url = "https://code.gogoais.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"#,
+            ),
+        )
+        .expect("write ix live");
+
+        let auth_after: Value = read_json_file(&auth_path).expect("read auth");
+        assert_eq!(auth_after["auth_mode"], "chatgpt");
+        assert_eq!(auth_after["tokens"]["access_token"], "oauth-token");
+        assert_eq!(auth_after["OPENAI_API_KEY"], "sk-ix");
+
+        let config_after = read_codex_config_text().expect("read config");
+        let parsed: toml::Value = toml::from_str(&config_after).expect("parse config");
+        assert_eq!(
+            parsed
+                .get("model_providers")
+                .and_then(|v| v.get("custom"))
+                .and_then(|v| v.get("experimental_bearer_token"))
+                .and_then(|v| v.as_str()),
+            Some("sk-ix")
         );
     }
 

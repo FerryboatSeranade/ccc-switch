@@ -344,6 +344,7 @@ function createIxProvider(
     icon: "default",
     iconColor: "#6B7280",
     settingsConfig: {
+      __ccSwitchProviderType: "ix_gogoai",
       apiKey,
       auth: {
         OPENAI_API_KEY: apiKey,
@@ -380,6 +381,7 @@ function mergeIxProviderDefaults(provider: Provider): Provider {
   const settingsConfig = apiKey
     ? {
         ...(provider.settingsConfig ?? {}),
+        __ccSwitchProviderType: "ix_gogoai",
         apiKey,
         auth: {
           ...(provider.settingsConfig?.auth ?? {}),
@@ -498,8 +500,11 @@ export function CodexIxQuickSetup({
       (provider.settingsConfig?.auth?.OPENAI_API_KEY === apiKey &&
         provider.settingsConfig?.env?.OPENAI_API_KEY === apiKey &&
         provider.settingsConfig?.apiKey === apiKey);
+    const hasLiveAuthCompatMarker =
+      provider.settingsConfig?.__ccSwitchProviderType === "ix_gogoai";
     if (
       hasCanonicalKey &&
+      hasLiveAuthCompatMarker &&
       script?.enabled &&
       script.code === IX_USAGE_SCRIPT_CODE &&
       script.autoQueryInterval === 30
@@ -707,7 +712,8 @@ export function CodexIxQuickSetup({
             </TooltipProvider>
           </div>
           <p className="text-xs text-muted-foreground">
-            账号密码会自动保存在本机；获取后自动配置 default 环境、切换到 https://code.gogoais.com/v1，并自动启用用量查询。
+            账号密码会自动保存在本机；获取后自动配置 default 环境、切换到
+            https://code.gogoais.com/v1，并自动启用用量查询。
             {credentialsSaveMessage}
           </p>
         </TabsContent>
@@ -756,7 +762,8 @@ export function CodexIxQuickSetup({
             </TooltipProvider>
           </div>
           <p className="text-xs text-muted-foreground">
-            使用同一个中转地址 https://code.gogoais.com/v1；保存后会立即切换到 default 环境。
+            使用同一个中转地址 https://code.gogoais.com/v1；保存后会立即切换到
+            default 环境。
           </p>
         </TabsContent>
       </Tabs>

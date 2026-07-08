@@ -622,6 +622,12 @@ fn restore_live_settings_for_provider_backfill(
         }
     }
 
+    if let Some(provider_type) = provider.settings_config.get("__ccSwitchProviderType") {
+        if let Some(obj) = settings.as_object_mut() {
+            obj.insert("__ccSwitchProviderType".to_string(), provider_type.clone());
+        }
+    }
+
     settings
 }
 
@@ -1740,7 +1746,8 @@ mod tests {
                     "models": [
                         { "model": "deepseek-v4-pro", "contextWindow": 1_000_000 }
                     ]
-                }
+                },
+                "__ccSwitchProviderType": "ix_gogoai"
             }),
             None,
         );
@@ -1759,6 +1766,11 @@ mod tests {
             result.get("modelCatalog"),
             provider.settings_config.get("modelCatalog"),
             "switch-away backfill must keep the DB-stored modelCatalog when Live has none"
+        );
+        assert_eq!(
+            result.get("__ccSwitchProviderType"),
+            provider.settings_config.get("__ccSwitchProviderType"),
+            "switch-away backfill must keep cc-switch private provider metadata"
         );
     }
 

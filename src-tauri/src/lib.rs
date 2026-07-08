@@ -505,8 +505,8 @@ pub fn run() {
 
             // 1.5. 自动导入 live 配置
             //
-            // 预设官方供应商不再在启动时自动创建，保持新安装的主列表清爽；
-            // 需要官方项的流程仍可通过 ensure_official_seed_by_id 按需补齐。
+            // 先导入用户已有的 live 配置（例如 ~/.codex/config.toml）为 default；
+            // 后面再补 Codex 官方入口，保证新用户也能一键切回官方账号体系。
             //
             // 捕获首次运行快照：所有全新装用户都会看到欢迎弹窗介绍 CodexSwitch 的工作方式。
             // 读失败时默认不弹，宁可漏弹也不要因为故障打扰用户。
@@ -549,6 +549,13 @@ pub fn run() {
                         app_type.as_str()
                     ),
                 }
+            }
+
+            if let Err(e) = app_state.db.ensure_official_seed_by_id(
+                crate::database::CODEX_OFFICIAL_PROVIDER_ID,
+                crate::app_config::AppType::Codex,
+            ) {
+                log::warn!("✗ Failed to ensure Codex official provider seed: {e}");
             }
 
             if crate::settings::get_settings().unify_codex_session_history {

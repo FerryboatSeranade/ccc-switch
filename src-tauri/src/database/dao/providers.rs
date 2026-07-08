@@ -710,7 +710,11 @@ impl Database {
 #[cfg(test)]
 mod ensure_official_seed_tests {
     use crate::app_config::AppType;
-    use crate::database::{Database, CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID};
+    use crate::database::{
+        Database, CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID, CODEX_OFFICIAL_PROVIDER_ID,
+    };
+    use crate::provider::Provider;
+    use serde_json::json;
 
     #[test]
     fn ensure_inserts_when_missing() {
@@ -733,6 +737,42 @@ mod ensure_official_seed_tests {
         assert_eq!(provider.category.as_deref(), Some("official"));
         assert_eq!(provider.icon.as_deref(), Some("anthropic"));
         assert_eq!(provider.icon_color.as_deref(), Some("#D4915D"));
+    }
+
+    #[test]
+    fn ensure_codex_official_preserves_existing_default_provider() {
+        let db = Database::memory().expect("memory db");
+        let mut default_provider = Provider::with_id(
+            "default".to_string(),
+            "default".to_string(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "sk-default" },
+                "config": "model_provider = \"custom\"\n"
+            }),
+            Some("https://code.gogoais.com".to_string()),
+        );
+        default_provider.category = Some("custom".to_string());
+        db.save_provider(AppType::Codex.as_str(), &default_provider)
+            .expect("save default provider");
+
+        let inserted = db
+            .ensure_official_seed_by_id(CODEX_OFFICIAL_PROVIDER_ID, AppType::Codex)
+            .expect("ensure codex official");
+        assert!(inserted, "Codex official seed should be inserted");
+
+        let providers = db
+            .get_all_providers(AppType::Codex.as_str())
+            .expect("list providers");
+        assert!(providers.contains_key("default"));
+        let official = providers
+            .get(CODEX_OFFICIAL_PROVIDER_ID)
+            .expect("codex official provider exists");
+        assert_eq!(official.name, "OpenAI Official");
+        assert_eq!(official.category.as_deref(), Some("official"));
+        assert_eq!(
+            official.website_url.as_deref(),
+            Some("https://chatgpt.com/codex")
+        );
     }
 
     #[test]
