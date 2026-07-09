@@ -11,6 +11,9 @@ export interface CodexGogoaisLoginResult {
   apiKey: string;
   baseUrl: string;
   loginBaseUrl: string;
+  keyName?: string;
+  quota?: number;
+  extraQuota?: number;
 }
 
 export const codexGogoaisApi = {

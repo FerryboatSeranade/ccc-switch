@@ -20,13 +20,22 @@ pub struct CodexGogoaisLoginResult {
     api_key: String,
     base_url: String,
     login_base_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra_quota: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct GogoaisCodexKey {
     api_key: String,
     base_url: Option<String>,
     openai_base_url: Option<String>,
+    key_name: Option<String>,
+    quota: Option<f64>,
+    extra_quota: Option<f64>,
 }
 
 #[tauri::command]
@@ -68,6 +77,9 @@ pub async fn codex_gogoais_login(
         api_key: key.api_key,
         base_url: codex_openai_base_url(&code_base_url),
         login_base_url: key_endpoint,
+        key_name: key.key_name,
+        quota: key.quota,
+        extra_quota: key.extra_quota,
     })
 }
 
@@ -158,6 +170,45 @@ async fn request_gogoais_codex_key(
                 &["openai_base_url"],
             ],
         ),
+        key_name: first_string_at(
+            &value,
+            &[
+                &["data", "codex", "name"],
+                &["data", "codex", "key_name"],
+                &["data", "codex", "keyName"],
+                &["data", "name"],
+                &["data", "key_name"],
+                &["data", "keyName"],
+                &["name"],
+                &["key_name"],
+                &["keyName"],
+            ],
+        ),
+        quota: first_number_at(
+            &value,
+            &[
+                &["data", "codex", "quota"],
+                &["data", "codex", "total_quota"],
+                &["data", "codex", "totalQuota"],
+                &["data", "quota"],
+                &["data", "total_quota"],
+                &["data", "totalQuota"],
+                &["quota"],
+                &["total_quota"],
+                &["totalQuota"],
+            ],
+        ),
+        extra_quota: first_number_at(
+            &value,
+            &[
+                &["data", "codex", "extra_quota"],
+                &["data", "codex", "extraQuota"],
+                &["data", "extra_quota"],
+                &["data", "extraQuota"],
+                &["extra_quota"],
+                &["extraQuota"],
+            ],
+        ),
     })
 }
 
@@ -201,6 +252,24 @@ fn string_at(value: &Value, path: &[&str]) -> Option<String> {
 
 fn first_string_at(value: &Value, paths: &[&[&str]]) -> Option<String> {
     paths.iter().find_map(|path| string_at(value, path))
+}
+
+fn number_at(value: &Value, path: &[&str]) -> Option<f64> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+
+    match current {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|number| number.is_finite())
+}
+
+fn first_number_at(value: &Value, paths: &[&[&str]]) -> Option<f64> {
+    paths.iter().find_map(|path| number_at(value, path))
 }
 
 fn gogoais_error_message(status: reqwest::StatusCode, value: Option<&Value>) -> String {
@@ -315,6 +384,34 @@ mod tests {
                 &[&["data", "codex", "api_key"], &["data", "api_key"]]
             ),
             Some("sk-gogoais-compatible-token".to_string())
+        );
+    }
+
+    #[test]
+    fn first_number_at_reads_quota_metadata() {
+        let value = json!({
+            "data": {
+                "codex": {
+                    "name": "codex-ferryboatseranade",
+                    "quota": "30.5",
+                    "extra_quota": 4.25
+                }
+            }
+        });
+        assert_eq!(
+            first_string_at(
+                &value,
+                &[&["data", "codex", "name"], &["data", "name"]]
+            ),
+            Some("codex-ferryboatseranade".to_string())
+        );
+        assert_eq!(
+            first_number_at(&value, &[&["data", "codex", "quota"]]),
+            Some(30.5)
+        );
+        assert_eq!(
+            first_number_at(&value, &[&["data", "codex", "extra_quota"]]),
+            Some(4.25)
         );
     }
 

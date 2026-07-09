@@ -33,6 +33,12 @@ interface IxGogoaiUsageMeta {
   quotaLimit?: number;
   quotaRemaining?: number;
   quotaUnit?: string;
+  totalQuota?: number;
+  totalUsed?: number;
+  totalRemaining?: number;
+  extraQuota?: number;
+  extraUsed?: number;
+  extraRemaining?: number;
   quotaWindowStart?: string | null;
   resetsAt?: string | null;
   expiresAt?: string;
@@ -111,6 +117,23 @@ function normalizeIxQuotaUnit(value: unknown): string {
 
 function formatQuotaAmount(value: number, unit: string): string {
   return unit === "USD" ? value.toFixed(2) : value.toFixed(0);
+}
+
+function formatOptionalQuotaAmount(
+  value: number | undefined,
+  unit: string,
+): string {
+  if (!isFiniteNumber(value)) return "-";
+  return formatQuotaAmount(value, unit);
+}
+
+function meaningfulIxDisplayName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === "default") return undefined;
+
+  return trimmed;
 }
 
 function formatDateTime(value: string | undefined): string {
@@ -484,6 +507,29 @@ const IxGogoaiUsageTable: React.FC<{
   const isActive =
     status !== "inactive" && status !== "disabled" && status !== "false";
   const quotaUnit = normalizeIxQuotaUnit(meta.quotaUnit);
+  const displayName =
+    meaningfulIxDisplayName(meta.keyName) ??
+    meaningfulIxDisplayName(provider.meta?.ixKeyName) ??
+    meaningfulIxDisplayName(provider.name) ??
+    "IX Codex";
+  const totalQuota = isFiniteNumber(meta.totalQuota)
+    ? meta.totalQuota
+    : provider.meta?.ixTotalQuota;
+  const totalUsed = isFiniteNumber(meta.totalUsed) ? meta.totalUsed : undefined;
+  const totalRemaining = isFiniteNumber(meta.totalRemaining)
+    ? meta.totalRemaining
+    : isFiniteNumber(totalQuota) && isFiniteNumber(totalUsed)
+      ? Math.max(totalQuota - totalUsed, 0)
+      : undefined;
+  const extraQuota = isFiniteNumber(meta.extraQuota)
+    ? meta.extraQuota
+    : provider.meta?.ixExtraQuota;
+  const extraUsed = isFiniteNumber(meta.extraUsed) ? meta.extraUsed : undefined;
+  const extraRemaining = isFiniteNumber(meta.extraRemaining)
+    ? meta.extraRemaining
+    : isFiniteNumber(extraQuota) && isFiniteNumber(extraUsed)
+      ? Math.max(extraQuota - extraUsed, 0)
+      : undefined;
   const copiedKeyText =
     typeof apiKey === "string" && apiKey.trim() ? apiKey.trim() : "";
   const copyApiKey = async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -504,7 +550,7 @@ const IxGogoaiUsageTable: React.FC<{
 
   return (
     <div className="mt-3 overflow-x-auto">
-      <div className="min-w-[900px] text-xs">
+      <div className="min-w-[1080px] text-xs">
         <div className="mb-2 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-muted-foreground">
             <span className="font-medium text-foreground">IX 用量</span>
@@ -535,24 +581,25 @@ const IxGogoaiUsageTable: React.FC<{
           </div>
         </div>
 
-        <div className="grid grid-cols-[minmax(130px,1fr)_150px_105px_150px_minmax(170px,1fr)_150px_72px_88px] items-center border-b border-border-default pb-2 text-[11px] font-medium text-muted-foreground">
+        <div className="grid grid-cols-[minmax(150px,1fr)_150px_105px_150px_minmax(170px,1fr)_170px_150px_72px_88px] items-center border-b border-border-default pb-2 text-[11px] font-medium text-muted-foreground">
           <span>名称</span>
           <span>Key</span>
           <span>分组</span>
           <span>消耗</span>
           <span>7d 限额</span>
+          <span>总/额外额度</span>
           <span>过期</span>
           <span>状态</span>
           <span>到期剩余</span>
         </div>
 
-        <div className="grid grid-cols-[minmax(130px,1fr)_150px_105px_150px_minmax(170px,1fr)_150px_72px_88px] items-center gap-y-2 py-3">
+        <div className="grid grid-cols-[minmax(150px,1fr)_150px_105px_150px_minmax(170px,1fr)_170px_150px_72px_88px] items-center gap-y-2 py-3">
           <div className="min-w-0 pr-3">
             <div
               className="truncate font-medium text-foreground"
-              title={meta.keyName || "default"}
+              title={displayName}
             >
-              {meta.keyName || "default"}
+              {displayName}
             </div>
           </div>
 
@@ -627,6 +674,23 @@ const IxGogoaiUsageTable: React.FC<{
             </div>
           </div>
 
+          <div className="space-y-1 pr-3 text-[11px]">
+            <IxQuotaSummaryLine
+              label="总"
+              total={totalQuota}
+              used={totalUsed}
+              remaining={totalRemaining}
+              unit={quotaUnit}
+            />
+            <IxQuotaSummaryLine
+              label="额外"
+              total={extraQuota}
+              used={extraUsed}
+              remaining={extraRemaining}
+              unit={quotaUnit}
+            />
+          </div>
+
           <div
             className="truncate pr-3 tabular-nums text-muted-foreground"
             title={formatDateTime(meta.expiresAt)}
@@ -657,6 +721,43 @@ const IxGogoaiUsageTable: React.FC<{
             {meta.daysUntilExpiry != null ? `${meta.daysUntilExpiry} 天` : "-"}
           </div>
         </div>
+      </div>
+    </div>
+  );
+};
+
+const IxQuotaSummaryLine: React.FC<{
+  label: string;
+  total?: number;
+  used?: number;
+  remaining?: number;
+  unit: string;
+}> = ({ label, total, used, remaining, unit }) => {
+  const hasAnyValue =
+    isFiniteNumber(total) ||
+    isFiniteNumber(used) ||
+    isFiniteNumber(remaining);
+
+  if (!hasAnyValue) {
+    return (
+      <div className="flex items-center justify-between gap-2 text-muted-foreground">
+        <span>{label}</span>
+        <span>-</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="tabular-nums font-medium text-foreground">
+          {formatOptionalQuotaAmount(used, unit)}/
+          {formatOptionalQuotaAmount(total, unit)} {unit}
+        </span>
+      </div>
+      <div className="tabular-nums text-[10px] text-muted-foreground">
+        剩余 {formatOptionalQuotaAmount(remaining, unit)} {unit}
       </div>
     </div>
   );

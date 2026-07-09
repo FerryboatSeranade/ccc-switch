@@ -20,8 +20,6 @@ import {
   extractCodexExperimentalBearerToken,
 } from "@/utils/providerConfigUtils";
 
-const IX_PROVIDER_ID = "default";
-const IX_PROVIDER_NAME = "default";
 const IX_CODE_BASE_URL = "https://code.gogoais.com";
 const IX_KEY_ENDPOINT = "https://x-api.gogoais.com/api/public/codex-key";
 const IX_CREDENTIALS_STORAGE_KEY = "codexSwitch:ixCredentials";
@@ -30,6 +28,13 @@ const IX_DEFAULT_PASSWORD = "123456";
 type IxSavedCredentials = {
   account: string;
   password: string;
+};
+
+type IxProviderMetadata = {
+  account?: string;
+  keyName?: string;
+  totalQuota?: number;
+  extraQuota?: number;
 };
 
 function loadIxSavedCredentials(): IxSavedCredentials {
@@ -138,6 +143,21 @@ const IX_USAGE_SCRIPT_CODE = `(() => {
         }
         return undefined;
       };
+      const firstText = function (source, keys) {
+        for (let index = 0; index < keys.length; index += 1) {
+          const key = keys[index];
+          const value = source && source[key];
+          if (typeof value === "string" && value.trim() !== "") return value.trim();
+        }
+        return undefined;
+      };
+      const firstNumberFrom = function (sources, keys) {
+        for (let index = 0; index < sources.length; index += 1) {
+          const value = firstNumber(sources[index], keys);
+          if (value !== undefined) return value;
+        }
+        return undefined;
+      };
       const numberOr = function (value, fallback) {
         return value === undefined ? fallback : value;
       };
@@ -198,6 +218,73 @@ const IX_USAGE_SCRIPT_CODE = `(() => {
       const quotaUsed = numberOr(firstNumber(quota, ["used", "usage", "current"]), Math.max(quotaLimit - quotaRemaining, 0));
       const quotaWindow = quota.window || quota.window_name || quota.name || "7d";
       const quotaUnit = normalizeUsdUnit(quota.unit || quota.currency || data.currency);
+      const totalQuota = firstNumberFrom([data, usage], [
+        "quota",
+        "total_quota",
+        "totalQuota",
+        "quota_total",
+        "quotaTotal",
+        "credit_limit",
+        "creditLimit",
+        "total_credit",
+        "totalCredit"
+      ]);
+      const totalUsed = numberOr(
+        firstNumberFrom([data, usage], [
+          "used_quota",
+          "usedQuota",
+          "quota_used",
+          "quotaUsed",
+          "used_credit",
+          "usedCredit"
+        ]),
+        totalQuota === undefined ? undefined : periodUsed
+      );
+      const totalRemaining = numberOr(
+        firstNumberFrom([data, usage], [
+          "remaining_quota",
+          "remainingQuota",
+          "quota_remaining",
+          "quotaRemaining",
+          "remaining_credit",
+          "remainingCredit",
+          "balance"
+        ]),
+        totalQuota === undefined || totalUsed === undefined
+          ? undefined
+          : Math.max(totalQuota - totalUsed, 0)
+      );
+      const extraQuota = firstNumberFrom([data, usage], [
+        "extra_quota",
+        "extraQuota",
+        "bonus_quota",
+        "bonusQuota",
+        "additional_quota",
+        "additionalQuota",
+        "gift_quota",
+        "giftQuota"
+      ]);
+      const extraUsed = firstNumberFrom([data, usage], [
+        "extra_used",
+        "extraUsed",
+        "extra_quota_used",
+        "extraQuotaUsed",
+        "bonus_used",
+        "bonusUsed"
+      ]);
+      const extraRemaining = numberOr(
+        firstNumberFrom([data, usage], [
+          "extra_remaining",
+          "extraRemaining",
+          "extra_quota_remaining",
+          "extraQuotaRemaining",
+          "bonus_remaining",
+          "bonusRemaining"
+        ]),
+        extraQuota === undefined || extraUsed === undefined
+          ? undefined
+          : Math.max(extraQuota - extraUsed, 0)
+      );
       const windowStart = quota.window_start || quota.windowStart || null;
       const resetsAt =
         quota.resets_at ||
@@ -218,7 +305,8 @@ const IX_USAGE_SCRIPT_CODE = `(() => {
         data.quota_reset_at ||
         resetFromWindowStart(windowStart, quotaWindow) ||
         null;
-      const keyName = data.name || data.key_name || data.keyName || data.api_key_name || "default";
+      const rawKeyName = firstText(data, ["name", "key_name", "keyName", "api_key_name", "apiKeyName"]);
+      const keyName = rawKeyName && rawKeyName.toLowerCase() !== "default" ? rawKeyName : "";
       const rawKeyValue = data.api_key || data.apiKey || data.key || data.sk || "{{apiKey}}";
       const rawKey = rawKeyValue ? String(rawKeyValue) : "";
       const maskedKey = rawKey && rawKey.length > 10
@@ -241,6 +329,12 @@ const IX_USAGE_SCRIPT_CODE = `(() => {
         quotaLimit: quotaLimit,
         quotaRemaining: quotaRemaining,
         quotaUnit: quotaUnit,
+        totalQuota: totalQuota,
+        totalUsed: totalUsed,
+        totalRemaining: totalRemaining,
+        extraQuota: extraQuota,
+        extraUsed: extraUsed,
+        extraRemaining: extraRemaining,
         quotaWindowStart: windowStart,
         resetsAt: resetsAt,
         expiresAt: expiresAt,
@@ -254,7 +348,7 @@ const IX_USAGE_SCRIPT_CODE = `(() => {
         timezone: timezone
       };
 
-      return [
+      const rows = [
         {
           planName: "IX",
           used: periodUsed,
@@ -275,6 +369,25 @@ const IX_USAGE_SCRIPT_CODE = `(() => {
           extra: resetsAt || ""
         }
       ];
+      if (totalQuota !== undefined || totalUsed !== undefined || totalRemaining !== undefined) {
+        rows.push({
+          planName: "总额度",
+          total: totalQuota,
+          used: totalUsed,
+          remaining: totalRemaining,
+          unit: quotaUnit
+        });
+      }
+      if (extraQuota !== undefined || extraUsed !== undefined || extraRemaining !== undefined) {
+        rows.push({
+          planName: "额外额度",
+          total: extraQuota,
+          used: extraUsed,
+          remaining: extraRemaining,
+          unit: quotaUnit
+        });
+      }
+      return rows;
     }
   };
 })()`;
@@ -327,18 +440,100 @@ function codexOpenaiBaseUrl(raw: string): string {
   return `${base}/v1`;
 }
 
+function fingerprintApiKey(apiKey: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < apiKey.length; index += 1) {
+    hash ^= apiKey.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(36).padStart(7, "0");
+}
+
+function ixProviderIdForApiKey(apiKey: string): string {
+  return `ix-gogoai-${fingerprintApiKey(apiKey)}`;
+}
+
+function meaningfulIxName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === "default") return undefined;
+
+  return trimmed;
+}
+
+function ixAccountSlug(account: string): string | undefined {
+  const base = account.trim().split("@")[0] ?? "";
+  const slug = base
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+
+  return slug || undefined;
+}
+
+function resolveIxProviderName(
+  apiKey: string,
+  existingProvider?: Provider,
+  metadata?: IxProviderMetadata,
+): string {
+  const keyName = meaningfulIxName(metadata?.keyName);
+  if (keyName) return keyName;
+
+  const existingName = meaningfulIxName(existingProvider?.name);
+  if (existingName) return existingName;
+
+  const accountSlug = ixAccountSlug(metadata?.account ?? "");
+  if (accountSlug) return `codex-${accountSlug}`;
+
+  return `codex-${fingerprintApiKey(apiKey)}`;
+}
+
+function isIxGogoaiProvider(provider: Provider | undefined): provider is Provider {
+  if (!provider) return false;
+  return (
+    provider.meta?.providerType === "ix_gogoai" ||
+    provider.settingsConfig?.__ccSwitchProviderType === "ix_gogoai"
+  );
+}
+
+function findIxProviderByApiKey(
+  providers: Record<string, Provider>,
+  apiKey: string,
+): { id: string; provider: Provider } | undefined {
+  const normalizedApiKey = apiKey.trim();
+  if (!normalizedApiKey) return undefined;
+
+  for (const [id, provider] of Object.entries(providers)) {
+    if (
+      isIxGogoaiProvider(provider) &&
+      resolveIxProviderApiKey(provider) === normalizedApiKey
+    ) {
+      return { id, provider };
+    }
+  }
+
+  return undefined;
+}
+
 function createIxProvider(
   apiKey: string,
   baseUrl: string,
+  providerId: string,
+  providerName: string,
   existingProvider?: Provider,
+  metadata?: IxProviderMetadata,
 ): Provider {
   const usageScript = createIxUsageScript();
   const config = buildCodexConfig(baseUrl, apiKey);
+  const keyFingerprint = fingerprintApiKey(apiKey);
 
   return {
     ...existingProvider,
-    id: IX_PROVIDER_ID,
-    name: IX_PROVIDER_NAME,
+    id: providerId,
+    name: providerName,
     websiteUrl: IX_CODE_BASE_URL,
     category: "third_party",
     icon: "default",
@@ -362,6 +557,11 @@ function createIxProvider(
       providerType: "ix_gogoai",
       apiFormat: "openai_responses",
       endpointAutoSelect: false,
+      ixKeyFingerprint: keyFingerprint,
+      ixAccount: metadata?.account,
+      ixKeyName: meaningfulIxName(metadata?.keyName) ?? providerName,
+      ixTotalQuota: metadata?.totalQuota,
+      ixExtraQuota: metadata?.extraQuota,
       usage_script: usageScript,
     },
     createdAt: existingProvider?.createdAt ?? Date.now(),
@@ -397,6 +597,9 @@ function mergeIxProviderDefaults(provider: Provider): Provider {
 
   return {
     ...provider,
+    name:
+      meaningfulIxName(provider.name) ??
+      (apiKey ? resolveIxProviderName(apiKey, provider) : "IX Codex"),
     websiteUrl: provider.websiteUrl || IX_CODE_BASE_URL,
     category: provider.category || "third_party",
     settingsConfig,
@@ -405,6 +608,13 @@ function mergeIxProviderDefaults(provider: Provider): Provider {
       providerType: "ix_gogoai",
       apiFormat: "openai_responses",
       endpointAutoSelect: false,
+      ixKeyFingerprint: apiKey
+        ? (provider.meta?.ixKeyFingerprint ?? fingerprintApiKey(apiKey))
+        : provider.meta?.ixKeyFingerprint,
+      ixKeyName:
+        meaningfulIxName(provider.meta?.ixKeyName) ??
+        meaningfulIxName(provider.name) ??
+        (apiKey ? resolveIxProviderName(apiKey, provider) : "IX Codex"),
       usage_script: createIxUsageScript(),
     },
   };
@@ -488,35 +698,45 @@ export function CodexIxQuickSetup({
   }, [account, password]);
 
   useEffect(() => {
-    const provider = providers[IX_PROVIDER_ID];
-    if (isSyncingUsageScript || provider?.meta?.providerType !== "ix_gogoai") {
+    if (isSyncingUsageScript) {
       return;
     }
 
-    const script = provider.meta?.usage_script;
-    const apiKey = resolveIxProviderApiKey(provider);
-    const hasCanonicalKey =
-      !apiKey ||
-      (provider.settingsConfig?.auth?.OPENAI_API_KEY === apiKey &&
-        provider.settingsConfig?.env?.OPENAI_API_KEY === apiKey &&
-        provider.settingsConfig?.apiKey === apiKey);
-    const hasLiveAuthCompatMarker =
-      provider.settingsConfig?.__ccSwitchProviderType === "ix_gogoai";
-    if (
-      hasCanonicalKey &&
-      hasLiveAuthCompatMarker &&
-      script?.enabled &&
-      script.code === IX_USAGE_SCRIPT_CODE &&
-      script.autoQueryInterval === 30
-    ) {
+    const staleEntry = Object.entries(providers).find(([, provider]) => {
+      if (!isIxGogoaiProvider(provider)) return false;
+
+      const script = provider.meta?.usage_script;
+      const apiKey = resolveIxProviderApiKey(provider);
+      const hasCanonicalKey =
+        !apiKey ||
+        (provider.settingsConfig?.auth?.OPENAI_API_KEY === apiKey &&
+          provider.settingsConfig?.env?.OPENAI_API_KEY === apiKey &&
+          provider.settingsConfig?.apiKey === apiKey);
+      const hasLiveAuthCompatMarker =
+        provider.settingsConfig?.__ccSwitchProviderType === "ix_gogoai";
+      const hasDisplayName = Boolean(meaningfulIxName(provider.name));
+
+      return !(
+        hasCanonicalKey &&
+        hasLiveAuthCompatMarker &&
+        hasDisplayName &&
+        script?.enabled &&
+        script.code === IX_USAGE_SCRIPT_CODE &&
+        script.autoQueryInterval === 30
+      );
+    });
+
+    if (!staleEntry) {
       return;
     }
+
+    const [providerId, provider] = staleEntry;
 
     setIsSyncingUsageScript(true);
     const nextProvider = mergeIxProviderDefaults(provider);
 
     providersApi
-      .update(nextProvider, "codex", IX_PROVIDER_ID)
+      .update(nextProvider, "codex", providerId)
       .then(() => onConfigured?.())
       .catch((error) => {
         console.warn("[IX] Failed to sync usage script:", error);
@@ -539,22 +759,42 @@ export function CodexIxQuickSetup({
         loginBaseUrl: IX_KEY_ENDPOINT,
         codeBaseUrl: IX_CODE_BASE_URL,
       });
-      const existingProvider = providers[IX_PROVIDER_ID];
+      const existingMatch = findIxProviderByApiKey(providers, result.apiKey);
+      const providerId =
+        existingMatch?.id ?? ixProviderIdForApiKey(result.apiKey);
+      const providerName = resolveIxProviderName(
+        result.apiKey,
+        existingMatch?.provider,
+        {
+          account: normalizedAccount,
+          keyName: result.keyName,
+          totalQuota: result.quota,
+          extraQuota: result.extraQuota,
+        },
+      );
       const provider = createIxProvider(
         result.apiKey,
         result.baseUrl,
-        existingProvider,
+        providerId,
+        providerName,
+        existingMatch?.provider,
+        {
+          account: normalizedAccount,
+          keyName: result.keyName,
+          totalQuota: result.quota,
+          extraQuota: result.extraQuota,
+        },
       );
-      const exists = Boolean(existingProvider);
+      const exists = Boolean(existingMatch);
 
       if (exists) {
-        await providersApi.update(provider, "codex", IX_PROVIDER_ID);
+        await providersApi.update(provider, "codex", providerId);
       } else {
         await providersApi.add(provider, "codex");
       }
-      await providersApi.switch(IX_PROVIDER_ID, "codex");
+      await providersApi.switch(providerId, "codex");
 
-      toast.success("已获取并配置 ix Codex 环境，用量查询已启用");
+      toast.success(`已获取并配置 ${providerName}，用量查询已启用`);
       await onConfigured?.();
     } catch (err) {
       console.warn("[IX] Codex quick setup failed:", err);
@@ -579,23 +819,31 @@ export function CodexIxQuickSetup({
 
     setIsApplyingRelayKey(true);
     try {
-      const existingProvider = providers[IX_PROVIDER_ID];
+      const existingMatch = findIxProviderByApiKey(providers, normalizedApiKey);
+      const providerId =
+        existingMatch?.id ?? ixProviderIdForApiKey(normalizedApiKey);
+      const providerName = resolveIxProviderName(
+        normalizedApiKey,
+        existingMatch?.provider,
+      );
       const provider = createIxProvider(
         normalizedApiKey,
         codexOpenaiBaseUrl(IX_CODE_BASE_URL),
-        existingProvider,
+        providerId,
+        providerName,
+        existingMatch?.provider,
       );
-      const exists = Boolean(existingProvider);
+      const exists = Boolean(existingMatch);
 
       if (exists) {
-        await providersApi.update(provider, "codex", IX_PROVIDER_ID);
+        await providersApi.update(provider, "codex", providerId);
       } else {
         await providersApi.add(provider, "codex");
       }
-      await providersApi.switch(IX_PROVIDER_ID, "codex");
+      await providersApi.switch(providerId, "codex");
 
       setRelayApiKey("");
-      toast.success("中转 API Key 已写入 default 环境并生效");
+      toast.success(`中转 API Key 已写入 ${providerName} 并生效`);
       await onConfigured?.();
     } catch (err) {
       console.warn("[IX] Codex relay API key setup failed:", err);
@@ -706,13 +954,13 @@ export function CodexIxQuickSetup({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  获取 Key 并切换 default 环境
+                  获取 Key 并切换对应 IX Codex 环境
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
           <p className="text-xs text-muted-foreground">
-            账号密码会自动保存在本机；获取后自动配置 default 环境、切换到
+            账号密码会自动保存在本机；获取后自动配置对应 IX Codex 环境、切换到
             https://code.gogoais.com/v1，并自动启用用量查询。
             {credentialsSaveMessage}
           </p>
@@ -756,14 +1004,14 @@ export function CodexIxQuickSetup({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  写入 Key 并切换 default 环境
+                  写入 Key 并切换对应 IX Codex 环境
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
           <p className="text-xs text-muted-foreground">
             使用同一个中转地址 https://code.gogoais.com/v1；保存后会立即切换到
-            default 环境。
+            对应 IX Codex 环境。
           </p>
         </TabsContent>
       </Tabs>

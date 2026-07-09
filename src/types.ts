@@ -213,6 +213,12 @@ export interface ProviderMeta {
   promptCacheKey?: string;
   // Codex OAuth FAST mode: injects service_tier="priority" on ChatGPT Codex requests
   codexFastMode?: boolean;
+  // IX/GogoAI managed Codex provider metadata
+  ixKeyFingerprint?: string;
+  ixAccount?: string;
+  ixKeyName?: string;
+  ixTotalQuota?: number;
+  ixExtraQuota?: number;
   // Codex Responses -> Chat Completions reasoning capability metadata
   codexChatReasoning?: CodexChatReasoning;
   // Custom User-Agent for local proxy routing. Only applied by the local proxy.
