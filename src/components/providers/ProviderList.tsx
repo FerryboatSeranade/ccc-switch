@@ -15,6 +15,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
+  Code2,
   History,
   Loader2,
   RotateCcw,
@@ -214,6 +215,7 @@ export function ProviderList({
   const [searchTerm, setSearchTerm] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isRestartingApp, setIsRestartingApp] = useState(false);
+  const [isRestartingVsCode, setIsRestartingVsCode] = useState(false);
   const [isSavingUnifyHistory, setIsSavingUnifyHistory] = useState(false);
   const [isMigratingUnifiedHistory, setIsMigratingUnifiedHistory] =
     useState(false);
@@ -393,36 +395,73 @@ export function ProviderList({
     setIsRestartingApp(true);
     toast.info(
       t("provider.restartAppStarting", {
-        defaultValue: "Restarting Codex App...",
+        defaultValue: "Restarting ChatGPT...",
       }),
     );
     try {
-      await settingsApi.restartCodexApp();
+      await settingsApi.restartChatGPTApp();
       toast.success(
         t("provider.restartAppSuccess", {
-          defaultValue: "Codex App restarted",
+          defaultValue: "ChatGPT restarted",
         }),
       );
     } catch (error) {
-      console.error("[ProviderList] Failed to restart Codex App", error);
+      console.error("[ProviderList] Failed to restart ChatGPT", error);
       const message =
         typeof error === "string"
           ? error
           : error instanceof Error
             ? error.message
             : t("provider.restartAppFailed", {
-                defaultValue: "Failed to restart Codex App",
+                defaultValue: "Failed to restart ChatGPT",
               });
       toast.error(
         message ||
           t("provider.restartAppFailed", {
-            defaultValue: "Failed to restart Codex App",
+            defaultValue: "Failed to restart ChatGPT",
           }),
       );
     } finally {
       setIsRestartingApp(false);
     }
   }, [isRestartingApp, t]);
+
+  const handleRestartVsCode = useCallback(async () => {
+    if (isRestartingVsCode) return;
+
+    setIsRestartingVsCode(true);
+    toast.info(
+      t("provider.restartVsCodeStarting", {
+        defaultValue: "Restarting VS Code...",
+      }),
+    );
+    try {
+      await settingsApi.restartVsCode();
+      toast.success(
+        t("provider.restartVsCodeSuccess", {
+          defaultValue: "VS Code restarted",
+        }),
+      );
+    } catch (error) {
+      console.error("[ProviderList] Failed to restart VS Code", error);
+      const message =
+        typeof error === "string"
+          ? error
+          : error instanceof Error
+            ? error.message
+            : t("provider.restartVsCodeFailed", {
+                defaultValue: "Failed to restart VS Code",
+              });
+      toast.error(
+        message ||
+          t("provider.restartVsCodeFailed", {
+            defaultValue: "Failed to restart VS Code",
+          }),
+      );
+    } finally {
+      setIsRestartingVsCode(false);
+    }
+  }, [isRestartingVsCode, t]);
 
   const unifyCodexSessionHistory = settings?.unifyCodexSessionHistory ?? true;
   const showRestoreUnifyOption =
@@ -695,7 +734,7 @@ export function ProviderList({
   return (
     <div className="mt-4 space-y-4">
       {appId === "codex" && (
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -800,11 +839,11 @@ export function ProviderList({
                   disabled={isRestartingApp}
                   title={t("provider.restartAppTooltip", {
                     defaultValue:
-                      "Restart the Codex App through Tauri relaunch",
+                      "Restart ChatGPT, which now contains Codex. Falls back to the legacy Codex App.",
                   })}
                   aria-label={t("provider.restartAppTooltip", {
                     defaultValue:
-                      "Restart the Codex App through Tauri relaunch",
+                      "Restart ChatGPT, which now contains Codex. Falls back to the legacy Codex App.",
                   })}
                 >
                   {isRestartingApp ? (
@@ -817,13 +856,53 @@ export function ProviderList({
                         defaultValue: "Restarting",
                       })
                     : t("provider.restartApp", {
-                        defaultValue: "Restart Codex App",
+                        defaultValue: "Restart ChatGPT (Codex)",
                       })}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 {t("provider.restartAppTooltip", {
-                  defaultValue: "Restart the Codex App through Tauri relaunch",
+                  defaultValue:
+                    "Restart ChatGPT, which now contains Codex. Falls back to the legacy Codex App.",
+                })}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  onClick={handleRestartVsCode}
+                  disabled={isRestartingVsCode}
+                  title={t("provider.restartVsCodeTooltip", {
+                    defaultValue:
+                      "Restart VS Code so the Codex extension reloads local configuration and authentication.",
+                  })}
+                  aria-label={t("provider.restartVsCodeTooltip", {
+                    defaultValue:
+                      "Restart VS Code so the Codex extension reloads local configuration and authentication.",
+                  })}
+                >
+                  {isRestartingVsCode ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Code2 className="h-3.5 w-3.5" />
+                  )}
+                  {isRestartingVsCode
+                    ? t("provider.restartingApp", {
+                        defaultValue: "Restarting",
+                      })
+                    : t("provider.restartVsCode", {
+                        defaultValue: "Restart VS Code",
+                      })}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t("provider.restartVsCodeTooltip", {
+                  defaultValue:
+                    "Restart VS Code so the Codex extension reloads local configuration and authentication.",
                 })}
               </TooltipContent>
             </Tooltip>

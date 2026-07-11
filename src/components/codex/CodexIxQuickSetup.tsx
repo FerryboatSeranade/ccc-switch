@@ -542,6 +542,7 @@ function createIxProvider(
       __ccSwitchProviderType: "ix_gogoai",
       apiKey,
       auth: {
+        auth_mode: "chatgpt",
         OPENAI_API_KEY: apiKey,
       },
       env: {
@@ -585,6 +586,7 @@ function mergeIxProviderDefaults(provider: Provider): Provider {
         apiKey,
         auth: {
           ...(provider.settingsConfig?.auth ?? {}),
+          auth_mode: "chatgpt",
           OPENAI_API_KEY: apiKey,
         },
         env: {

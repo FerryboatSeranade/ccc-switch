@@ -1304,10 +1304,13 @@ fn merge_codex_live_auth_with_provider_key(auth: &Value) -> Result<Value, AppErr
     }
 
     let obj = live_auth.as_object_mut().expect("live_auth is object");
+    // IX/GogoAI's Codex route expects the ChatGPT auth envelope even though
+    // the actual request credential is the provider-scoped bearer token.
+    obj.insert(
+        "auth_mode".to_string(),
+        Value::String("chatgpt".to_string()),
+    );
     obj.insert("OPENAI_API_KEY".to_string(), Value::String(token));
-    if !obj.contains_key("auth_mode") {
-        obj.insert("auth_mode".to_string(), Value::String("apikey".to_string()));
-    }
 
     Ok(live_auth)
 }
@@ -1892,6 +1895,44 @@ requires_openai_auth = true
                 .and_then(|v| v.as_str()),
             Some("sk-ix")
         );
+    }
+
+    #[test]
+    #[serial]
+    fn ix_gogoai_live_write_marks_fresh_auth_as_chatgpt() {
+        let _home = TestHome::new();
+
+        write_codex_provider_live_with_catalog(
+            &json!({
+                "__ccSwitchProviderType": "ix_gogoai",
+                "auth": { "OPENAI_API_KEY": "sk-ix-fresh" },
+                "config": r#"model_provider = "custom"
+
+[model_providers.custom]
+name = "GogoAI"
+base_url = "https://code.gogoais.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"#
+            }),
+            Some("third_party"),
+            &json!({ "OPENAI_API_KEY": "sk-ix-fresh" }),
+            Some(
+                r#"model_provider = "custom"
+
+[model_providers.custom]
+name = "GogoAI"
+base_url = "https://code.gogoais.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"#,
+            ),
+        )
+        .expect("write fresh ix live config");
+
+        let auth: Value = read_json_file(&get_codex_auth_path()).expect("read fresh auth");
+        assert_eq!(auth["auth_mode"], "chatgpt");
+        assert_eq!(auth["OPENAI_API_KEY"], "sk-ix-fresh");
     }
 
     #[test]

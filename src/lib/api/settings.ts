@@ -74,6 +74,24 @@ export const settingsApi = {
     return await invoke("restart_codex_app");
   },
 
+  async restartChatGPTApp(): Promise<{
+    wasRunning: boolean;
+    launched: boolean;
+    appPath?: string;
+    appId?: string;
+  }> {
+    return await invoke("restart_chatgpt_app");
+  },
+
+  async restartVsCode(): Promise<{
+    wasRunning: boolean;
+    launched: boolean;
+    appPath?: string;
+    appId?: string;
+  }> {
+    return await invoke("restart_vscode");
+  },
+
   async installUpdateAndRestart(): Promise<boolean> {
     return await invoke("install_update_and_restart");
   },

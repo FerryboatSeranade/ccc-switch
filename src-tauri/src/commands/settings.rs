@@ -243,17 +243,213 @@ pub struct CodexAppRestartResult {
     pub app_id: Option<String>,
 }
 
-/// 重启外部 Codex.app，而不是重启 CodexSwitch 自身。
+/// 重启承载 Codex 的 ChatGPT App；旧版独立 Codex App 仍作为兼容回退。
+#[tauri::command]
+pub async fn restart_chatgpt_app() -> Result<CodexAppRestartResult, String> {
+    restart_chatgpt_app_impl().await
+}
+
+/// 兼容旧版前端调用。语义与 `restart_chatgpt_app` 相同。
 #[tauri::command]
 pub async fn restart_codex_app() -> Result<CodexAppRestartResult, String> {
-    restart_codex_app_impl().await
+    restart_chatgpt_app_impl().await
 }
 
 #[cfg(target_os = "macos")]
-async fn restart_codex_app_impl() -> Result<CodexAppRestartResult, String> {
-    tauri::async_runtime::spawn_blocking(restart_codex_app_macos)
+async fn restart_chatgpt_app_impl() -> Result<CodexAppRestartResult, String> {
+    tauri::async_runtime::spawn_blocking(restart_chatgpt_or_codex_app_macos)
         .await
-        .map_err(|e| format!("重启 Codex App 任务失败: {e}"))?
+        .map_err(|e| format!("重启 ChatGPT/Codex App 任务失败: {e}"))?
+}
+
+#[cfg(target_os = "macos")]
+fn restart_chatgpt_or_codex_app_macos() -> Result<CodexAppRestartResult, String> {
+    if resolve_chatgpt_app_path().is_some() {
+        restart_chatgpt_app_macos()
+    } else {
+        restart_codex_app_macos()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn restart_chatgpt_app_macos() -> Result<CodexAppRestartResult, String> {
+    let app_path = resolve_chatgpt_app_path();
+    let had_processes = chatgpt_app_has_processes(app_path.as_deref())?;
+    let was_running = chatgpt_app_is_running(app_path.as_deref()).unwrap_or(had_processes);
+
+    if was_running || had_processes {
+        if let Err(err) = quit_chatgpt_app(app_path.as_deref()) {
+            log::warn!("ChatGPT graceful quit failed, will terminate processes if needed: {err}");
+        }
+
+        if !wait_for_chatgpt_process_state(
+            app_path.as_deref(),
+            false,
+            std::time::Duration::from_secs(5),
+        )? {
+            signal_codex_app_processes(app_path.as_deref(), "-TERM")?;
+            if !wait_for_chatgpt_process_state(
+                app_path.as_deref(),
+                false,
+                std::time::Duration::from_secs(10),
+            )? {
+                signal_codex_app_processes(app_path.as_deref(), "-KILL")?;
+                if !wait_for_chatgpt_process_state(
+                    app_path.as_deref(),
+                    false,
+                    std::time::Duration::from_secs(5),
+                )? {
+                    return Err("等待 ChatGPT App 退出超时".to_string());
+                }
+            }
+        }
+    }
+
+    launch_chatgpt_app(app_path.as_deref())?;
+    if !wait_for_chatgpt_process_state(
+        app_path.as_deref(),
+        true,
+        std::time::Duration::from_secs(15),
+    )? && !chatgpt_app_is_running(app_path.as_deref())?
+    {
+        return Err("等待 ChatGPT App 启动超时".to_string());
+    }
+
+    Ok(CodexAppRestartResult {
+        was_running,
+        launched: true,
+        app_path: app_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string()),
+        app_id: Some(chatgpt_app_bundle_id(app_path.as_deref())),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_chatgpt_app_path() -> Option<std::path::PathBuf> {
+    let mut candidates = vec![std::path::PathBuf::from("/Applications/ChatGPT.app")];
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join("Applications").join("ChatGPT.app"));
+    }
+
+    candidates.into_iter().find(|path| path.exists())
+}
+
+#[cfg(target_os = "macos")]
+fn chatgpt_app_bundle_id(app_path: Option<&std::path::Path>) -> String {
+    let Some(app_path) = app_path else {
+        return "com.openai.chat".to_string();
+    };
+
+    let plist_path = app_path.join("Contents").join("Info.plist");
+    let output = std::process::Command::new("defaults")
+        .arg("read")
+        .arg(plist_path)
+        .arg("CFBundleIdentifier")
+        .output();
+    let Ok(output) = output else {
+        return "com.openai.chat".to_string();
+    };
+    if !output.status.success() {
+        return "com.openai.chat".to_string();
+    }
+
+    let bundle_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if bundle_id.is_empty()
+        || !bundle_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '.' || ch == '-')
+    {
+        "com.openai.chat".to_string()
+    } else {
+        bundle_id
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn chatgpt_app_is_running(app_path: Option<&std::path::Path>) -> Result<bool, String> {
+    let bundle_id = chatgpt_app_bundle_id(app_path);
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(format!(r#"application id "{bundle_id}" is running"#))
+        .output()
+        .map_err(|e| format!("检查 ChatGPT App 运行状态失败: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "检查 ChatGPT App 运行状态失败: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim() == "true")
+}
+
+#[cfg(target_os = "macos")]
+fn quit_chatgpt_app(app_path: Option<&std::path::Path>) -> Result<(), String> {
+    let bundle_id = chatgpt_app_bundle_id(app_path);
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(format!(r#"tell application id "{bundle_id}" to quit"#))
+        .output()
+        .map_err(|e| format!("退出 ChatGPT App 失败: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "退出 ChatGPT App 失败: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn chatgpt_app_has_processes(app_path: Option<&std::path::Path>) -> Result<bool, String> {
+    match app_path {
+        Some(path) => Ok(!codex_app_pids(path)?.is_empty()),
+        None => chatgpt_app_is_running(None),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn wait_for_chatgpt_process_state(
+    app_path: Option<&std::path::Path>,
+    expected: bool,
+    timeout: std::time::Duration,
+) -> Result<bool, String> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if chatgpt_app_has_processes(app_path)? == expected {
+            return Ok(true);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+
+    Ok(false)
+}
+
+#[cfg(target_os = "macos")]
+fn launch_chatgpt_app(app_path: Option<&std::path::Path>) -> Result<(), String> {
+    let mut command = std::process::Command::new("open");
+    if let Some(path) = app_path {
+        command.arg(path);
+    } else {
+        command.arg("-b").arg("com.openai.chat");
+    }
+
+    let output = command
+        .output()
+        .map_err(|e| format!("启动 ChatGPT App 失败: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "启动 ChatGPT App 失败: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -469,10 +665,70 @@ fn launch_codex_app(app_path: Option<&std::path::Path>) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-async fn restart_codex_app_impl() -> Result<CodexAppRestartResult, String> {
-    tauri::async_runtime::spawn_blocking(restart_codex_app_windows)
+async fn restart_chatgpt_app_impl() -> Result<CodexAppRestartResult, String> {
+    tauri::async_runtime::spawn_blocking(restart_chatgpt_or_codex_app_windows)
         .await
-        .map_err(|e| format!("重启 Codex App 任务失败: {e}"))?
+        .map_err(|e| format!("重启 ChatGPT/Codex App 任务失败: {e}"))?
+}
+
+#[cfg(target_os = "windows")]
+fn restart_chatgpt_or_codex_app_windows() -> Result<CodexAppRestartResult, String> {
+    match resolve_windows_chatgpt_launch_target() {
+        Ok(target) => restart_chatgpt_app_windows(&target),
+        Err(chatgpt_err) => {
+            log::info!("Windows ChatGPT App unavailable, falling back to Codex App: {chatgpt_err}");
+            restart_codex_app_windows()
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn restart_chatgpt_app_windows(
+    launch_target: &WindowsCodexLaunchTarget,
+) -> Result<CodexAppRestartResult, String> {
+    let was_running = windows_process_exists_by_image("ChatGPT.exe").unwrap_or(false);
+
+    if was_running {
+        windows_command_status_detail("taskkill", &["/F", "/T", "/IM", "ChatGPT.exe"])
+            .map_err(|err| format!("退出 Windows ChatGPT App 失败：{}", err.detail()))?;
+        if !wait_for_windows_process_state_by_image(
+            "ChatGPT.exe",
+            false,
+            std::time::Duration::from_secs(10),
+        )? {
+            return Err(
+                "等待 Windows ChatGPT App 退出超时，请手动关闭 ChatGPT 后重试。".to_string(),
+            );
+        }
+    }
+
+    start_windows_app(launch_target, "ChatGPT App")?;
+    match wait_for_windows_process_state_by_image(
+        "ChatGPT.exe",
+        true,
+        std::time::Duration::from_secs(8),
+    ) {
+        Ok(true) => {}
+        Ok(false) => {
+            log::warn!(
+                "已请求启动 Windows ChatGPT App（{}），但短时间内没有检测到 ChatGPT.exe 进程",
+                launch_target.label()
+            );
+        }
+        Err(err) => {
+            log::warn!(
+                "已请求启动 Windows ChatGPT App（{}），但启动后进程检测失败: {err}",
+                launch_target.label()
+            );
+        }
+    }
+
+    Ok(CodexAppRestartResult {
+        was_running,
+        launched: true,
+        app_path: launch_target.app_path(),
+        app_id: launch_target.app_id(),
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -571,6 +827,107 @@ fn resolve_windows_codex_launch_target() -> Result<WindowsCodexLaunchTarget, Str
 }
 
 #[cfg(target_os = "windows")]
+fn resolve_windows_chatgpt_launch_target() -> Result<WindowsCodexLaunchTarget, String> {
+    let mut failures = Vec::new();
+
+    match windows_chatgpt_app_id() {
+        Ok(app_id) => return Ok(WindowsCodexLaunchTarget::AppId(app_id)),
+        Err(err) => failures.push(err),
+    }
+
+    if let Some(path) = windows_chatgpt_app_alias_path() {
+        return Ok(WindowsCodexLaunchTarget::ExecutablePath(path));
+    }
+
+    Err(format!(
+        "未能定位 Windows ChatGPT App。详细：{}",
+        failures.join("；")
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_chatgpt_app_id() -> Result<String, String> {
+    let mut failures = Vec::new();
+
+    match windows_chatgpt_app_id_from_powershell() {
+        Ok(app_id) => return Ok(app_id),
+        Err(err) => failures.push(format!("PowerShell 查询失败：{err}")),
+    }
+
+    match windows_app_id_from_manifest_dirs("openai.chatgpt_", "OpenAI.ChatGPT") {
+        Ok(app_id) => return Ok(app_id),
+        Err(err) => failures.push(format!("WindowsApps manifest 查询失败：{err}")),
+    }
+
+    Err(failures.join("；"))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_chatgpt_app_id_from_powershell() -> Result<String, String> {
+    let script = r#"
+$ErrorActionPreference = "Stop"
+
+function Test-IsSwitcher($entry) {
+  $name = [string]$entry.Name
+  $appId = [string]$entry.AppID
+  return (
+    $name -match "(?i)CCC Switch|CC Switch|Codex Switch|Profile Switcher|Codex Account Switcher|Account Switcher|切号器" -or
+    $appId -match "(?i)ccc-switch|cc-switch|codex-switch|profile-switcher|codex-account-switcher|com\.local"
+  )
+}
+
+$startApps = @(Get-StartApps | Where-Object { -not (Test-IsSwitcher $_) })
+$packages = @(Get-AppxPackage -Name "OpenAI.ChatGPT" -ErrorAction SilentlyContinue)
+if ($packages.Count -eq 0) {
+  $packages = @(Get-AppxPackage -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Name -eq "OpenAI.ChatGPT" -or
+      $_.PackageFamilyName -like "OpenAI.ChatGPT_*"
+    })
+}
+
+foreach ($package in $packages) {
+  $app = $startApps |
+    Where-Object { $_.AppID -like "$($package.PackageFamilyName)!*" } |
+    Select-Object -First 1
+  if ($app) {
+    $app.AppID
+    exit 0
+  }
+}
+
+$app = $startApps |
+  Where-Object {
+    $_.Name -eq "ChatGPT" -and (
+      $_.AppID -match "(?i)^OpenAI\.ChatGPT_" -or
+      $_.AppID -match "(?i)9PLM9XGG6VKS"
+    )
+  } |
+  Select-Object -First 1
+
+if (-not $app) {
+  $app = $startApps |
+    Where-Object {
+      $_.Name -eq "ChatGPT" -and
+      $_.AppID -match "!" -and
+      $_.AppID -notmatch "(?i)switcher|account-switcher|codex-account-switcher|ccc-switch|cc-switch|codex-switch|com\.local"
+    } |
+    Select-Object -First 1
+}
+
+if (-not $app) { exit 1 }
+$app.AppID
+"#;
+    let output = windows_powershell_stdout(script)?;
+    output
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "未能从 Windows 开始菜单读取 ChatGPT AppID".to_string())
+}
+
+#[cfg(target_os = "windows")]
 fn windows_codex_app_id() -> Result<String, String> {
     let mut failures = Vec::new();
 
@@ -654,6 +1011,14 @@ $app.AppID
 
 #[cfg(target_os = "windows")]
 fn windows_codex_app_id_from_manifest_dirs() -> Result<String, String> {
+    windows_app_id_from_manifest_dirs("openai.codex_", "OpenAI.Codex")
+}
+
+#[cfg(target_os = "windows")]
+fn windows_app_id_from_manifest_dirs(
+    package_prefix: &str,
+    package_label: &str,
+) -> Result<String, String> {
     let mut roots = Vec::new();
     if let Some(program_files) =
         std::env::var_os("ProgramW6432").or_else(|| std::env::var_os("ProgramFiles"))
@@ -687,7 +1052,10 @@ fn windows_codex_app_id_from_manifest_dirs() -> Result<String, String> {
             let Some(dir_name) = package_dir.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            if !dir_name.to_ascii_lowercase().starts_with("openai.codex_") {
+            if !dir_name
+                .to_ascii_lowercase()
+                .starts_with(&package_prefix.to_ascii_lowercase())
+            {
                 continue;
             }
 
@@ -703,10 +1071,10 @@ fn windows_codex_app_id_from_manifest_dirs() -> Result<String, String> {
     }
 
     Err(if failures.is_empty() {
-        "未在 WindowsApps manifest 中找到 OpenAI.Codex AppID".to_string()
+        format!("未在 WindowsApps manifest 中找到 {package_label} AppID")
     } else {
         format!(
-            "未在 WindowsApps manifest 中找到 OpenAI.Codex AppID；{}",
+            "未在 WindowsApps manifest 中找到 {package_label} AppID；{}",
             failures.join("；")
         )
     })
@@ -738,6 +1106,20 @@ fn windows_codex_app_alias_path() -> Option<std::path::PathBuf> {
         .join("Microsoft")
         .join("WindowsApps")
         .join("Codex.exe");
+    if candidate.exists() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_chatgpt_app_alias_path() -> Option<std::path::PathBuf> {
+    let local_app_data = std::env::var_os("LOCALAPPDATA")?;
+    let candidate = std::path::PathBuf::from(local_app_data)
+        .join("Microsoft")
+        .join("WindowsApps")
+        .join("ChatGPT.exe");
     if candidate.exists() {
         Some(candidate)
     } else {
@@ -785,23 +1167,31 @@ $processes
 
 #[cfg(target_os = "windows")]
 fn windows_codex_app_process_ids_from_tasklist() -> Result<Vec<String>, String> {
-    let output = windows_command_stdout(
-        "tasklist",
-        &["/FI", "IMAGENAME eq Codex.exe", "/FO", "CSV", "/NH"],
-    )?;
+    windows_process_ids_by_image("Codex.exe")
+}
+
+#[cfg(target_os = "windows")]
+fn windows_process_ids_by_image(image_name: &str) -> Result<Vec<String>, String> {
+    let filter = format!("IMAGENAME eq {image_name}");
+    let output = windows_command_stdout("tasklist", &["/FI", &filter, "/FO", "CSV", "/NH"])?;
     Ok(output
         .lines()
-        .filter_map(|line| parse_tasklist_csv_pid(line))
+        .filter_map(|line| parse_tasklist_csv_pid_for_image(line, image_name))
         .collect())
 }
 
 #[cfg(target_os = "windows")]
 fn parse_tasklist_csv_pid(line: &str) -> Option<String> {
+    parse_tasklist_csv_pid_for_image(line, "Codex.exe")
+}
+
+#[cfg(target_os = "windows")]
+fn parse_tasklist_csv_pid_for_image(line: &str, image_name: &str) -> Option<String> {
     let columns = parse_windows_csv_line(line);
     if columns.len() < 2 {
         return None;
     }
-    if !columns[0].eq_ignore_ascii_case("Codex.exe") {
+    if !columns[0].eq_ignore_ascii_case(image_name) {
         return None;
     }
     let pid = columns[1].trim();
@@ -840,6 +1230,28 @@ fn parse_windows_csv_line(line: &str) -> Vec<String> {
 #[cfg(target_os = "windows")]
 fn codex_windows_process_exists() -> Result<bool, String> {
     windows_codex_app_process_ids().map(|ids| !ids.is_empty())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_process_exists_by_image(image_name: &str) -> Result<bool, String> {
+    windows_process_ids_by_image(image_name).map(|ids| !ids.is_empty())
+}
+
+#[cfg(target_os = "windows")]
+fn wait_for_windows_process_state_by_image(
+    image_name: &str,
+    expected: bool,
+    timeout: std::time::Duration,
+) -> Result<bool, String> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if windows_process_exists_by_image(image_name)? == expected {
+            return Ok(true);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+
+    Ok(false)
 }
 
 #[cfg(target_os = "windows")]
@@ -972,22 +1384,27 @@ Get-CimInstance Win32_Process -Filter "Name = 'Codex.exe'" |
 }
 
 #[cfg(target_os = "windows")]
-fn start_codex_app_windows(target: &WindowsCodexLaunchTarget) -> Result<(), String> {
+fn start_windows_app(target: &WindowsCodexLaunchTarget, app_name: &str) -> Result<(), String> {
     match target {
         WindowsCodexLaunchTarget::AppId(app_id) => hidden_command("explorer.exe")
             .arg(format!("shell:AppsFolder\\{app_id}"))
             .spawn()
             .map(|_| ())
-            .map_err(|err| format!("未能通过 Windows AppID 启动 Codex App（{app_id}）：{err}")),
+            .map_err(|err| format!("未能通过 Windows AppID 启动 {app_name}（{app_id}）：{err}")),
         WindowsCodexLaunchTarget::ExecutablePath(path) => {
             hidden_command(path).spawn().map(|_| ()).map_err(|err| {
                 format!(
-                    "未能通过 Windows App Execution Alias 启动 Codex App（{}）：{err}",
+                    "未能通过 Windows App Execution Alias 启动 {app_name}（{}）：{err}",
                     path.display()
                 )
             })
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn start_codex_app_windows(target: &WindowsCodexLaunchTarget) -> Result<(), String> {
+    start_windows_app(target, "Codex App")
 }
 
 #[cfg(target_os = "windows")]
@@ -1180,8 +1597,198 @@ fn windows_powershell_stdout(script: &str) -> Result<String, String> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-async fn restart_codex_app_impl() -> Result<CodexAppRestartResult, String> {
-    Err("当前平台暂不支持自动重启 Codex App".to_string())
+async fn restart_chatgpt_app_impl() -> Result<CodexAppRestartResult, String> {
+    Err("当前平台暂不支持自动重启 ChatGPT/Codex App".to_string())
+}
+
+/// 重启 VS Code，令其中的 Codex 扩展重新读取本机配置与认证数据。
+#[tauri::command]
+pub async fn restart_vscode() -> Result<CodexAppRestartResult, String> {
+    restart_vscode_impl().await
+}
+
+#[cfg(target_os = "macos")]
+async fn restart_vscode_impl() -> Result<CodexAppRestartResult, String> {
+    tauri::async_runtime::spawn_blocking(restart_vscode_macos)
+        .await
+        .map_err(|e| format!("重启 VS Code 任务失败: {e}"))?
+}
+
+#[cfg(target_os = "macos")]
+fn restart_vscode_macos() -> Result<CodexAppRestartResult, String> {
+    let was_running = vscode_is_running().unwrap_or(false);
+    if was_running {
+        if let Err(err) = quit_vscode_macos() {
+            log::warn!(
+                "VS Code graceful quit failed, will terminate the main process if needed: {err}"
+            );
+        }
+
+        if !wait_for_vscode_macos_state(false, std::time::Duration::from_secs(8))? {
+            let _ = std::process::Command::new("pkill")
+                .args(["-TERM", "-x", "Code"])
+                .output();
+            if !wait_for_vscode_macos_state(false, std::time::Duration::from_secs(8))? {
+                let _ = std::process::Command::new("pkill")
+                    .args(["-KILL", "-x", "Code"])
+                    .output();
+                if !wait_for_vscode_macos_state(false, std::time::Duration::from_secs(4))? {
+                    return Err("等待 VS Code 退出超时，请手动关闭 VS Code 后重试。".to_string());
+                }
+            }
+        }
+    }
+
+    let output = std::process::Command::new("open")
+        .args(["-b", "com.microsoft.VSCode"])
+        .output()
+        .map_err(|err| format!("启动 VS Code 失败: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "启动 VS Code 失败: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    if !wait_for_vscode_macos_state(true, std::time::Duration::from_secs(15))? {
+        return Err("等待 VS Code 启动超时".to_string());
+    }
+
+    Ok(CodexAppRestartResult {
+        was_running,
+        launched: true,
+        app_path: None,
+        app_id: Some("com.microsoft.VSCode".to_string()),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn vscode_is_running() -> Result<bool, String> {
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(r#"application id "com.microsoft.VSCode" is running"#)
+        .output()
+        .map_err(|err| format!("检查 VS Code 运行状态失败: {err}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim() == "true")
+}
+
+#[cfg(target_os = "macos")]
+fn quit_vscode_macos() -> Result<(), String> {
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(r#"tell application id "com.microsoft.VSCode" to quit"#)
+        .output()
+        .map_err(|err| format!("退出 VS Code 失败: {err}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn wait_for_vscode_macos_state(
+    expected: bool,
+    timeout: std::time::Duration,
+) -> Result<bool, String> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if vscode_is_running()? == expected {
+            return Ok(true);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    Ok(false)
+}
+
+#[cfg(target_os = "windows")]
+async fn restart_vscode_impl() -> Result<CodexAppRestartResult, String> {
+    tauri::async_runtime::spawn_blocking(restart_vscode_windows)
+        .await
+        .map_err(|e| format!("重启 VS Code 任务失败: {e}"))?
+}
+
+#[cfg(target_os = "windows")]
+fn restart_vscode_windows() -> Result<CodexAppRestartResult, String> {
+    let was_running = windows_process_exists_by_image("Code.exe").unwrap_or(false);
+    if was_running {
+        windows_command_status_detail("taskkill", &["/F", "/T", "/IM", "Code.exe"])
+            .map_err(|err| format!("退出 VS Code 失败：{}", err.detail()))?;
+        if !wait_for_windows_process_state_by_image(
+            "Code.exe",
+            false,
+            std::time::Duration::from_secs(10),
+        )? {
+            return Err("等待 VS Code 退出超时，请手动关闭 VS Code 后重试。".to_string());
+        }
+    }
+
+    let app_path = resolve_windows_vscode_path();
+    match app_path.as_deref() {
+        Some(path) => hidden_command(path)
+            .spawn()
+            .map_err(|err| format!("启动 VS Code 失败（{}）：{err}", path.display()))?,
+        None => hidden_command("code")
+            .arg("--reuse-window")
+            .spawn()
+            .map_err(|err| {
+                format!("未能定位 VS Code，请确认已安装或将 code 命令加入 PATH：{err}")
+            })?,
+    };
+
+    if !wait_for_windows_process_state_by_image(
+        "Code.exe",
+        true,
+        std::time::Duration::from_secs(15),
+    )? {
+        return Err("等待 VS Code 启动超时".to_string());
+    }
+
+    Ok(CodexAppRestartResult {
+        was_running,
+        launched: true,
+        app_path: app_path.map(|path| path.to_string_lossy().to_string()),
+        app_id: None,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_windows_vscode_path() -> Option<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        candidates.push(
+            std::path::PathBuf::from(local_app_data)
+                .join("Programs")
+                .join("Microsoft VS Code")
+                .join("Code.exe"),
+        );
+    }
+    for program_files in ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(root) = std::env::var_os(program_files) {
+            candidates.push(
+                std::path::PathBuf::from(root)
+                    .join("Microsoft VS Code")
+                    .join("Code.exe"),
+            );
+        }
+    }
+    candidates.into_iter().find(|path| path.exists())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+async fn restart_vscode_impl() -> Result<CodexAppRestartResult, String> {
+    std::process::Command::new("code")
+        .arg("--reuse-window")
+        .spawn()
+        .map_err(|err| format!("启动 VS Code 失败: {err}"))?;
+    Ok(CodexAppRestartResult {
+        was_running: false,
+        launched: true,
+        app_path: None,
+        app_id: None,
+    })
 }
 
 /// 下载并安装应用更新，然后由后端直接重启应用。
