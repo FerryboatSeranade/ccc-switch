@@ -252,14 +252,33 @@ pub struct CodexAppRestartResult {
 
 /// 重启承载 Codex 的 ChatGPT App；旧版独立 Codex App 仍作为兼容回退。
 #[tauri::command]
-pub async fn restart_chatgpt_app() -> Result<CodexAppRestartResult, String> {
+pub async fn restart_chatgpt_app(
+    state: tauri::State<'_, crate::store::AppState>,
+) -> Result<CodexAppRestartResult, String> {
+    sync_current_codex_provider_before_restart(state.inner())?;
     restart_chatgpt_app_impl().await
 }
 
 /// 兼容旧版前端调用。语义与 `restart_chatgpt_app` 相同。
 #[tauri::command]
-pub async fn restart_codex_app() -> Result<CodexAppRestartResult, String> {
+pub async fn restart_codex_app(
+    state: tauri::State<'_, crate::store::AppState>,
+) -> Result<CodexAppRestartResult, String> {
+    sync_current_codex_provider_before_restart(state.inner())?;
     restart_chatgpt_app_impl().await
+}
+
+/// ChatGPT/Codex 会在退出或启动时重写部分本地状态。重启前以当前供应商为
+/// SSOT 重投影一次，确保 API Key、auth_mode 和 provider-scoped bearer token
+/// 已落到启动时实际读取的文件中。
+fn sync_current_codex_provider_before_restart(
+    state: &crate::store::AppState,
+) -> Result<(), String> {
+    crate::services::provider::ProviderService::sync_current_provider_for_app(
+        state,
+        crate::app_config::AppType::Codex,
+    )
+    .map_err(|err| format!("重启前写入当前 Codex 认证配置失败: {err}"))
 }
 
 #[cfg(target_os = "macos")]
