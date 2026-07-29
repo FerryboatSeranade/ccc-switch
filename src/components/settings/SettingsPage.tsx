@@ -46,7 +46,7 @@ import { ImportExportSection } from "@/components/settings/ImportExportSection";
 import { BackupListSection } from "@/components/settings/BackupListSection";
 import { WebdavSyncSection } from "@/components/settings/WebdavSyncSection";
 import { ProxyTabContent } from "@/components/settings/ProxyTabContent";
-import { ModelTestConfigPanel } from "@/components/usage/ModelTestConfigPanel";
+import { ConnectivityCheckConfigPanel } from "@/components/usage/ConnectivityCheckConfigPanel";
 import { UsageDashboard } from "@/components/usage/UsageDashboard";
 import { LogConfigPanel } from "@/components/settings/LogConfigPanel";
 import { AuthCenterPanel } from "@/components/settings/AuthCenterPanel";
@@ -349,6 +349,7 @@ export function SettingsPage({
                             claudeDir={settings.claudeConfigDir}
                             codexDir={settings.codexConfigDir}
                             geminiDir={settings.geminiConfigDir}
+                            grokDir={settings.grokConfigDir}
                             opencodeDir={settings.opencodeConfigDir}
                             openclawDir={settings.openclawConfigDir}
                             hermesDir={settings.hermesConfigDir}
@@ -452,7 +453,7 @@ export function SettingsPage({
                       </AccordionItem>
 
                       <AccordionItem
-                        value="test"
+                        value="connectivityCheck"
                         className="rounded-xl glass-card overflow-hidden"
                       >
                         <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/50">
@@ -460,16 +461,18 @@ export function SettingsPage({
                             <FlaskConical className="h-5 w-5 text-emerald-500" />
                             <div className="text-left">
                               <h3 className="text-base font-semibold">
-                                {t("settings.advanced.modelTest.title")}
+                                {t("settings.advanced.connectivityCheck.title")}
                               </h3>
                               <p className="text-sm text-muted-foreground font-normal">
-                                {t("settings.advanced.modelTest.description")}
+                                {t(
+                                  "settings.advanced.connectivityCheck.description",
+                                )}
                               </p>
                             </div>
                           </div>
                         </AccordionTrigger>
                         <AccordionContent className="px-6 pb-6 pt-4 border-t border-border/50">
-                          <ModelTestConfigPanel />
+                          <ConnectivityCheckConfigPanel />
                         </AccordionContent>
                       </AccordionItem>
 
@@ -500,7 +503,12 @@ export function SettingsPage({
               </TabsContent>
 
               <TabsContent value="usage" className="mt-0">
-                <UsageDashboard />
+                <UsageDashboard
+                  refreshIntervalMs={settings?.usageDashboardRefreshIntervalMs}
+                  onRefreshIntervalChange={(usageDashboardRefreshIntervalMs) =>
+                    handleAutoSave({ usageDashboardRefreshIntervalMs })
+                  }
+                />
               </TabsContent>
             </div>
 
