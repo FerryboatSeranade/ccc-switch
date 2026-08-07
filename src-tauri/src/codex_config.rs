@@ -344,6 +344,24 @@ pub fn extract_codex_api_key(auth: Option<&Value>, config_text: Option<&str>) ->
         .or_else(|| config_text.and_then(extract_codex_experimental_bearer_token))
 }
 
+/// Resolve a provider API key across current and legacy Codex storage shapes.
+///
+/// New providers keep the key in `auth.OPENAI_API_KEY`. Older imports may only
+/// have a provider-scoped `experimental_bearer_token` in the TOML text, while
+/// early IX profiles also mirrored the key into `env.OPENAI_API_KEY`.
+pub fn extract_codex_provider_api_key(settings: &Value) -> Option<String> {
+    let auth = settings.get("auth");
+    let config_text = settings.get("config").and_then(Value::as_str);
+    extract_codex_api_key(auth, config_text).or_else(|| {
+        settings
+            .pointer("/env/OPENAI_API_KEY")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(str::to_string)
+    })
+}
+
 /// Extract the upstream base URL from a Codex `config.toml` string.
 ///
 /// Prefers the active `[model_providers.<model_provider>].base_url`, falling
@@ -415,6 +433,24 @@ pub fn codex_auth_has_oauth_login_material(auth: &Value) -> bool {
             _ => true,
         }
     })
+}
+
+/// Whether the auth payload contains a usable ChatGPT OAuth token set.
+///
+/// `auth_mode = "chatgpt"` is only valid when Codex can actually load account
+/// credentials. Unrelated metadata must not make an API-key provider look like
+/// an authenticated ChatGPT account.
+pub fn codex_auth_has_usable_oauth_tokens(auth: &Value) -> bool {
+    [
+        auth.pointer("/tokens/access_token"),
+        auth.pointer("/tokens/id_token"),
+        auth.pointer("/tokens/refresh_token"),
+        auth.get("refresh_token"),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(Value::as_str)
+    .any(|token| !token.trim().is_empty())
 }
 
 pub fn should_restore_codex_provider_token_for_backfill(
@@ -1857,26 +1893,68 @@ fn should_write_codex_provider_auth_for_compat(settings: &Value) -> bool {
 
 fn merge_codex_live_auth_with_provider_key(auth: &Value) -> Result<Value, AppError> {
     let token = extract_codex_auth_api_key(auth)
-        .ok_or_else(|| AppError::Config("Codex IX/GogoAI 供应商缺少 OPENAI_API_KEY".to_string()))?;
+        .ok_or_else(|| AppError::Config("Codex 供应商缺少 OPENAI_API_KEY".to_string()))?;
 
-    let mut live_auth = match get_codex_auth_path().exists() {
+    let existing_auth = match get_codex_auth_path().exists() {
         true => read_json_file(&get_codex_auth_path()).unwrap_or_else(|_| json!({})),
         false => json!({}),
     };
-    if !live_auth.is_object() {
-        live_auth = json!({});
-    }
 
+    let preserves_oauth = codex_auth_has_usable_oauth_tokens(&existing_auth);
+    let mut live_auth = if preserves_oauth {
+        existing_auth
+    } else {
+        json!({})
+    };
     let obj = live_auth.as_object_mut().expect("live_auth is object");
-    // IX/GogoAI's Codex route expects the ChatGPT auth envelope even though
-    // the actual request credential is the provider-scoped bearer token.
+    let auth_mode = if preserves_oauth { "chatgpt" } else { "apikey" };
     obj.insert(
         "auth_mode".to_string(),
-        Value::String("chatgpt".to_string()),
+        Value::String(auth_mode.to_string()),
     );
     obj.insert("OPENAI_API_KEY".to_string(), Value::String(token));
 
     Ok(live_auth)
+}
+
+/// Activate a provider API key in Codex's live auth file.
+///
+/// During proxy takeover, `config.toml` belongs to the proxy and must retain
+/// its local route and placeholder token. If a real ChatGPT OAuth session is
+/// present, preserve it and keep `chatgpt` mode; otherwise use Codex's standard
+/// API-key envelope. A `chatgpt` mode without OAuth tokens is invalid and the
+/// current ChatGPT app rewrites it during startup.
+pub fn write_codex_api_key_auth_for_external_restart(auth: &Value) -> Result<(), AppError> {
+    let live_auth = merge_codex_live_auth_with_provider_key(auth)?;
+    let auth_path = get_codex_auth_path();
+    if let Some(parent) = auth_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+    }
+    write_json_file(&auth_path, &live_auth)?;
+
+    let written_auth = read_json_file(&auth_path)?;
+    let expected_key = extract_codex_auth_api_key(auth)
+        .ok_or_else(|| AppError::Config("Codex 供应商缺少 OPENAI_API_KEY".to_string()))?;
+    let written_key = extract_codex_auth_api_key(&written_auth);
+    if written_key.as_deref() != Some(expected_key.as_str()) {
+        return Err(AppError::Config(
+            "Codex auth.json 写后校验失败：API Key 未正确落盘".to_string(),
+        ));
+    }
+
+    let expected_mode = if codex_auth_has_usable_oauth_tokens(&written_auth) {
+        "chatgpt"
+    } else {
+        "apikey"
+    };
+    if written_auth.get("auth_mode").and_then(Value::as_str) != Some(expected_mode) {
+        return Err(AppError::Config(format!(
+            "Codex auth.json 写后校验失败：认证模式应为 {expected_mode}"
+        )));
+    }
+
+    log::info!("Codex 外部重启认证已落盘并校验，认证模式: {expected_mode}");
+    Ok(())
 }
 
 /// Build the live Codex config for provider switching.
@@ -2639,7 +2717,7 @@ requires_openai_auth = true
 
     #[test]
     #[serial]
-    fn ix_gogoai_live_write_marks_fresh_auth_as_chatgpt() {
+    fn ix_gogoai_live_write_uses_api_key_mode_without_oauth() {
         let _home = TestHome::new();
 
         write_codex_provider_live_with_catalog(
@@ -2672,8 +2750,63 @@ requires_openai_auth = true
         .expect("write fresh ix live config");
 
         let auth: Value = read_json_file(&get_codex_auth_path()).expect("read fresh auth");
-        assert_eq!(auth["auth_mode"], "chatgpt");
+        assert_eq!(auth["auth_mode"], "apikey");
         assert_eq!(auth["OPENAI_API_KEY"], "sk-ix-fresh");
+        assert!(auth.get("tokens").is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn api_key_restart_auth_write_preserves_oauth_and_replaces_the_key() {
+        let _home = TestHome::new();
+        let auth_path = get_codex_auth_path();
+        std::fs::create_dir_all(auth_path.parent().expect("auth parent")).expect("create .codex");
+        write_json_file(
+            &auth_path,
+            &json!({
+                "auth_mode": "chatgpt",
+                "tokens": { "access_token": "oauth-token" },
+                "OPENAI_API_KEY": "sk-old"
+            }),
+        )
+        .expect("seed existing auth");
+
+        write_codex_api_key_auth_for_external_restart(&json!({
+            "OPENAI_API_KEY": "sk-current"
+        }))
+        .expect("write restart auth");
+
+        let auth: Value = read_json_file(&auth_path).expect("read updated auth");
+        assert_eq!(auth["auth_mode"], "chatgpt");
+        assert_eq!(auth["tokens"]["access_token"], "oauth-token");
+        assert_eq!(auth["OPENAI_API_KEY"], "sk-current");
+    }
+
+    #[test]
+    #[serial]
+    fn api_key_restart_auth_write_replaces_invalid_chatgpt_envelope() {
+        let _home = TestHome::new();
+        let auth_path = get_codex_auth_path();
+        std::fs::create_dir_all(auth_path.parent().expect("auth parent")).expect("create .codex");
+        write_json_file(
+            &auth_path,
+            &json!({
+                "auth_mode": "chatgpt",
+                "OPENAI_API_KEY": "stale-key",
+                "last_refresh": null
+            }),
+        )
+        .expect("seed invalid ChatGPT auth");
+
+        write_codex_api_key_auth_for_external_restart(&json!({
+            "OPENAI_API_KEY": "sk-current"
+        }))
+        .expect("write restart auth");
+
+        let auth: Value = read_json_file(&auth_path).expect("read updated auth");
+        assert_eq!(auth["auth_mode"], "apikey");
+        assert_eq!(auth["OPENAI_API_KEY"], "sk-current");
+        assert_eq!(auth.as_object().map(|value| value.len()), Some(2));
     }
 
     #[test]

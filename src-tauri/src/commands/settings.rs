@@ -255,8 +255,7 @@ pub struct CodexAppRestartResult {
 pub async fn restart_chatgpt_app(
     state: tauri::State<'_, crate::store::AppState>,
 ) -> Result<CodexAppRestartResult, String> {
-    sync_current_codex_provider_before_restart(state.inner())?;
-    restart_chatgpt_app_impl().await
+    restart_chatgpt_app_impl(state.inner()).await
 }
 
 /// 兼容旧版前端调用。语义与 `restart_chatgpt_app` 相同。
@@ -264,41 +263,45 @@ pub async fn restart_chatgpt_app(
 pub async fn restart_codex_app(
     state: tauri::State<'_, crate::store::AppState>,
 ) -> Result<CodexAppRestartResult, String> {
-    sync_current_codex_provider_before_restart(state.inner())?;
-    restart_chatgpt_app_impl().await
+    restart_chatgpt_app_impl(state.inner()).await
 }
 
-/// ChatGPT/Codex 会在退出或启动时重写部分本地状态。重启前以当前供应商为
-/// SSOT 重投影一次，确保 API Key、auth_mode 和 provider-scoped bearer token
-/// 已落到启动时实际读取的文件中。
-fn sync_current_codex_provider_before_restart(
+/// ChatGPT/Codex 会在退出时回写部分本地状态。必须等旧进程完全退出后，再以
+/// 当前供应商为 SSOT 重投影认证和路由，最后启动新进程，避免旧状态覆盖新 Key。
+fn sync_current_codex_provider_before_external_launch(
     state: &crate::store::AppState,
 ) -> Result<(), String> {
-    crate::services::provider::ProviderService::sync_current_provider_for_app(
+    crate::services::provider::ProviderService::sync_current_codex_provider_for_external_restart(
         state,
-        crate::app_config::AppType::Codex,
     )
-    .map_err(|err| format!("重启前写入当前 Codex 认证配置失败: {err}"))
+    .map_err(|err| format!("启动前写入当前 Codex 认证配置失败: {err}"))
 }
 
 #[cfg(target_os = "macos")]
-async fn restart_chatgpt_app_impl() -> Result<CodexAppRestartResult, String> {
-    tauri::async_runtime::spawn_blocking(restart_chatgpt_or_codex_app_macos)
+async fn restart_chatgpt_app_impl(
+    state: &crate::store::AppState,
+) -> Result<CodexAppRestartResult, String> {
+    let state = state.clone();
+    tauri::async_runtime::spawn_blocking(move || restart_chatgpt_or_codex_app_macos(&state))
         .await
         .map_err(|e| format!("重启 ChatGPT/Codex App 任务失败: {e}"))?
 }
 
 #[cfg(target_os = "macos")]
-fn restart_chatgpt_or_codex_app_macos() -> Result<CodexAppRestartResult, String> {
+fn restart_chatgpt_or_codex_app_macos(
+    state: &crate::store::AppState,
+) -> Result<CodexAppRestartResult, String> {
     if resolve_chatgpt_app_path().is_some() {
-        restart_chatgpt_app_macos()
+        restart_chatgpt_app_macos(state)
     } else {
-        restart_codex_app_macos()
+        restart_codex_app_macos(state)
     }
 }
 
 #[cfg(target_os = "macos")]
-fn restart_chatgpt_app_macos() -> Result<CodexAppRestartResult, String> {
+fn restart_chatgpt_app_macos(
+    state: &crate::store::AppState,
+) -> Result<CodexAppRestartResult, String> {
     let app_path = resolve_chatgpt_app_path();
     let had_processes = chatgpt_app_has_processes(app_path.as_deref())?;
     let was_running = chatgpt_app_is_running(app_path.as_deref()).unwrap_or(had_processes);
@@ -331,6 +334,7 @@ fn restart_chatgpt_app_macos() -> Result<CodexAppRestartResult, String> {
         }
     }
 
+    sync_current_codex_provider_before_external_launch(state)?;
     launch_chatgpt_app(app_path.as_deref())?;
     if !wait_for_chatgpt_process_state(
         app_path.as_deref(),
@@ -479,7 +483,9 @@ fn launch_chatgpt_app(app_path: Option<&std::path::Path>) -> Result<(), String> 
 }
 
 #[cfg(target_os = "macos")]
-fn restart_codex_app_macos() -> Result<CodexAppRestartResult, String> {
+fn restart_codex_app_macos(
+    state: &crate::store::AppState,
+) -> Result<CodexAppRestartResult, String> {
     let app_path = resolve_codex_app_path();
     let had_processes = codex_app_has_processes(app_path.as_deref())?;
     let was_running = codex_app_is_running().unwrap_or(had_processes);
@@ -512,6 +518,7 @@ fn restart_codex_app_macos() -> Result<CodexAppRestartResult, String> {
         }
     }
 
+    sync_current_codex_provider_before_external_launch(state)?;
     launch_codex_app(app_path.as_deref())?;
     if !wait_for_codex_process_state(
         app_path.as_deref(),
@@ -691,107 +698,56 @@ fn launch_codex_app(app_path: Option<&std::path::Path>) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-async fn restart_chatgpt_app_impl() -> Result<CodexAppRestartResult, String> {
-    tauri::async_runtime::spawn_blocking(restart_chatgpt_or_codex_app_windows)
+async fn restart_chatgpt_app_impl(
+    state: &crate::store::AppState,
+) -> Result<CodexAppRestartResult, String> {
+    let state = state.clone();
+    tauri::async_runtime::spawn_blocking(move || restart_chatgpt_or_codex_app_windows(&state))
         .await
         .map_err(|e| format!("重启 ChatGPT/Codex App 任务失败: {e}"))?
 }
 
 #[cfg(target_os = "windows")]
-fn restart_chatgpt_or_codex_app_windows() -> Result<CodexAppRestartResult, String> {
-    match resolve_windows_chatgpt_launch_target() {
-        Ok(target) => restart_chatgpt_app_windows(&target),
+fn restart_chatgpt_or_codex_app_windows(
+    state: &crate::store::AppState,
+) -> Result<CodexAppRestartResult, String> {
+    let launch_target = match resolve_windows_chatgpt_launch_target() {
+        Ok(target) => target,
         Err(chatgpt_err) => {
             log::info!("Windows ChatGPT App unavailable, falling back to Codex App: {chatgpt_err}");
-            restart_codex_app_windows()
+            resolve_windows_codex_launch_target()?
         }
-    }
+    };
+
+    restart_chatgpt_or_codex_app_windows_with_target(state, &launch_target)
 }
 
 #[cfg(target_os = "windows")]
-fn restart_chatgpt_app_windows(
+fn restart_chatgpt_or_codex_app_windows_with_target(
+    state: &crate::store::AppState,
     launch_target: &WindowsCodexLaunchTarget,
 ) -> Result<CodexAppRestartResult, String> {
-    let was_running = windows_process_exists_by_image("ChatGPT.exe").unwrap_or(false);
+    // New ChatGPT builds can retain the OpenAI.Codex package identity while
+    // renaming the desktop executable to ChatGPT.exe. Process detection must
+    // therefore be independent from which package/AppID resolved the launch.
+    let running_processes = windows_codex_desktop_process_snapshot()?;
+    let was_running = running_processes.has_processes();
 
     if was_running {
-        windows_command_status_detail("taskkill", &["/F", "/T", "/IM", "ChatGPT.exe"])
-            .map_err(|err| format!("退出 Windows ChatGPT App 失败：{}", err.detail()))?;
-        if !wait_for_windows_process_state_by_image(
-            "ChatGPT.exe",
-            false,
-            std::time::Duration::from_secs(10),
-        )? {
-            return Err(
-                "等待 Windows ChatGPT App 退出超时，请手动关闭 ChatGPT 后重试。".to_string(),
-            );
-        }
+        quit_windows_codex_desktop_processes(&running_processes)?;
     }
 
-    start_windows_app(launch_target, "ChatGPT App")?;
-    match wait_for_windows_process_state_by_image(
-        "ChatGPT.exe",
-        true,
-        std::time::Duration::from_secs(8),
-    ) {
-        Ok(true) => {}
-        Ok(false) => {
-            log::warn!(
-                "已请求启动 Windows ChatGPT App（{}），但短时间内没有检测到 ChatGPT.exe 进程",
-                launch_target.label()
-            );
-        }
-        Err(err) => {
-            log::warn!(
-                "已请求启动 Windows ChatGPT App（{}），但启动后进程检测失败: {err}",
-                launch_target.label()
-            );
-        }
-    }
-
-    Ok(CodexAppRestartResult {
-        was_running,
-        launched: true,
-        app_path: launch_target.app_path(),
-        app_id: launch_target.app_id(),
-    })
-}
-
-#[cfg(target_os = "windows")]
-fn restart_codex_app_windows() -> Result<CodexAppRestartResult, String> {
-    let launch_target = resolve_windows_codex_launch_target()?;
-    let was_running = codex_windows_process_exists().unwrap_or(false);
-
-    if was_running {
-        quit_codex_app_windows()?;
-        match wait_for_windows_codex_process_state(false, std::time::Duration::from_secs(10)) {
-            Ok(true) => {}
-            Ok(false) => {
-                return Err(
-                    "等待 Windows Codex App 退出超时，请手动关闭 Codex App 后重试。".to_string(),
-                );
-            }
-            Err(err) => {
-                log::warn!("已请求关闭 Windows Codex App，但退出后进程检测失败: {err}");
-            }
-        }
-    }
-
-    start_codex_app_windows(&launch_target)?;
-    match wait_for_windows_codex_process_state(true, std::time::Duration::from_secs(8)) {
-        Ok(true) => {}
-        Ok(false) => {
-            log::warn!(
-                "已请求启动 Windows Codex App（{}），但短时间内没有检测到 Codex.exe 进程",
-                launch_target.label()
-            );
-        }
-        Err(err) => {
-            log::warn!(
-                "已请求启动 Windows Codex App（{}），但启动后进程检测失败: {err}",
-                launch_target.label()
-            );
-        }
+    sync_current_codex_provider_before_external_launch(state)?;
+    let process_baseline = windows_codex_desktop_process_snapshot()?;
+    start_windows_app(launch_target, "ChatGPT/Codex App")?;
+    if !wait_for_new_windows_codex_desktop_process(
+        &process_baseline,
+        std::time::Duration::from_secs(12),
+    )? {
+        return Err(format!(
+            "已请求启动 Windows ChatGPT/Codex App（{}），但未检测到新的 ChatGPT.exe 或 Codex.exe 进程",
+            launch_target.label()
+        ));
     }
 
     Ok(CodexAppRestartResult {
@@ -1259,6 +1215,93 @@ fn codex_windows_process_exists() -> Result<bool, String> {
 }
 
 #[cfg(target_os = "windows")]
+#[derive(Debug)]
+struct WindowsCodexDesktopProcessSnapshot {
+    chatgpt_ids: Vec<String>,
+    codex_ids: Vec<String>,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsCodexDesktopProcessSnapshot {
+    fn has_processes(&self) -> bool {
+        !self.chatgpt_ids.is_empty() || !self.codex_ids.is_empty()
+    }
+
+    fn has_new_process_since(&self, baseline: &Self) -> bool {
+        self.chatgpt_ids
+            .iter()
+            .any(|pid| !baseline.chatgpt_ids.contains(pid))
+            || self
+                .codex_ids
+                .iter()
+                .any(|pid| !baseline.codex_ids.contains(pid))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_codex_desktop_process_snapshot() -> Result<WindowsCodexDesktopProcessSnapshot, String> {
+    Ok(WindowsCodexDesktopProcessSnapshot {
+        chatgpt_ids: windows_process_ids_by_image("ChatGPT.exe")?,
+        codex_ids: windows_codex_app_process_ids()?,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn quit_windows_codex_desktop_processes(
+    running: &WindowsCodexDesktopProcessSnapshot,
+) -> Result<(), String> {
+    if !running.chatgpt_ids.is_empty() {
+        if let Err(err) =
+            windows_command_status_detail("taskkill", &["/F", "/T", "/IM", "ChatGPT.exe"])
+        {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if windows_process_exists_by_image("ChatGPT.exe").unwrap_or(true) {
+                return Err(format!("退出 Windows ChatGPT App 失败：{}", err.detail()));
+            }
+            log::warn!(
+                "taskkill 结束 ChatGPT.exe 返回异常，但进程已经退出：{}",
+                err.detail()
+            );
+        }
+
+        if !wait_for_windows_process_state_by_image(
+            "ChatGPT.exe",
+            false,
+            std::time::Duration::from_secs(10),
+        )? {
+            return Err("等待 Windows ChatGPT App 退出超时，请手动关闭应用后重试。".to_string());
+        }
+    }
+
+    // ChatGPT and the legacy Codex desktop app share ~/.codex. If both are
+    // present, the survivor can write its cached auth back after we switch.
+    if !running.codex_ids.is_empty() && codex_windows_process_exists()? {
+        quit_codex_app_windows()?;
+        if !wait_for_windows_codex_process_state(false, std::time::Duration::from_secs(10))? {
+            return Err("等待 Windows Codex App 退出超时，请手动关闭应用后重试。".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn wait_for_new_windows_codex_desktop_process(
+    baseline: &WindowsCodexDesktopProcessSnapshot,
+    timeout: std::time::Duration,
+) -> Result<bool, String> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if windows_codex_desktop_process_snapshot()?.has_new_process_since(baseline) {
+            return Ok(true);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+
+    Ok(false)
+}
+
+#[cfg(target_os = "windows")]
 fn windows_process_exists_by_image(image_name: &str) -> Result<bool, String> {
     windows_process_ids_by_image(image_name).map(|ids| !ids.is_empty())
 }
@@ -1426,11 +1469,6 @@ fn start_windows_app(target: &WindowsCodexLaunchTarget, app_name: &str) -> Resul
             })
         }
     }
-}
-
-#[cfg(target_os = "windows")]
-fn start_codex_app_windows(target: &WindowsCodexLaunchTarget) -> Result<(), String> {
-    start_windows_app(target, "Codex App")
 }
 
 #[cfg(target_os = "windows")]
@@ -1623,7 +1661,9 @@ fn windows_powershell_stdout(script: &str) -> Result<String, String> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-async fn restart_chatgpt_app_impl() -> Result<CodexAppRestartResult, String> {
+async fn restart_chatgpt_app_impl(
+    _state: &crate::store::AppState,
+) -> Result<CodexAppRestartResult, String> {
     Err("当前平台暂不支持自动重启 ChatGPT/Codex App".to_string())
 }
 

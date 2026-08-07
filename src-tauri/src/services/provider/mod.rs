@@ -311,6 +311,105 @@ mod tests {
         provider
     }
 
+    #[test]
+    #[serial]
+    fn external_restart_activates_generic_codex_api_key_provider() {
+        with_test_home(|state, home| {
+            crate::settings::reload_settings().expect("reload settings");
+            let provider = codex_provider_with_usage(
+                "generic-key",
+                "https://api.example.com/v1",
+                "sk-current",
+                None,
+                None,
+                None,
+            );
+            state
+                .db
+                .save_provider(AppType::Codex.as_str(), &provider)
+                .expect("save provider");
+            state
+                .db
+                .set_current_provider(AppType::Codex.as_str(), &provider.id)
+                .expect("set database current provider");
+            crate::settings::set_current_provider(&AppType::Codex, Some(&provider.id))
+                .expect("set local current provider");
+
+            let auth_path = home.join(".codex").join("auth.json");
+            fs::create_dir_all(auth_path.parent().expect("auth parent"))
+                .expect("create Codex directory");
+            write_json_file(
+                &auth_path,
+                &json!({
+                    "auth_mode": "chatgpt",
+                    "OPENAI_API_KEY": "stale-key"
+                }),
+            )
+            .expect("seed stale auth");
+
+            ProviderService::sync_current_codex_provider_for_external_restart(state)
+                .expect("project provider for restart");
+
+            let auth: Value = read_json_file(&auth_path).expect("read projected auth");
+            assert_eq!(auth["auth_mode"], "apikey");
+            assert_eq!(auth["OPENAI_API_KEY"], "sk-current");
+
+            let config = fs::read_to_string(home.join(".codex").join("config.toml"))
+                .expect("read projected config");
+            let parsed: toml::Value = toml::from_str(&config).expect("parse projected config");
+            assert_eq!(
+                parsed
+                    .get("model_providers")
+                    .and_then(|providers| providers.get("custom"))
+                    .and_then(|provider| provider.get("experimental_bearer_token"))
+                    .and_then(|value| value.as_str()),
+                Some("sk-current")
+            );
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn external_restart_recovers_api_key_from_legacy_codex_toml() {
+        with_test_home(|state, home| {
+            crate::settings::reload_settings().expect("reload settings");
+            let provider = Provider::with_id(
+                "legacy-config-key".to_string(),
+                "Legacy config key".to_string(),
+                json!({
+                    "auth": {},
+                    "config": r#"model_provider = "custom"
+[model_providers.custom]
+name = "custom"
+base_url = "https://api.example.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+experimental_bearer_token = "sk-legacy-current"
+"#
+                }),
+                None,
+            );
+            state
+                .db
+                .save_provider(AppType::Codex.as_str(), &provider)
+                .expect("save provider");
+            state
+                .db
+                .set_current_provider(AppType::Codex.as_str(), &provider.id)
+                .expect("set database current provider");
+            crate::settings::set_current_provider(&AppType::Codex, Some(&provider.id))
+                .expect("set local current provider");
+
+            ProviderService::sync_current_codex_provider_for_external_restart(state)
+                .expect("project legacy provider for restart");
+
+            let auth: Value = read_json_file(&home.join(".codex").join("auth.json"))
+                .expect("read projected auth");
+            assert_eq!(auth["auth_mode"], "apikey");
+            assert_eq!(auth["OPENAI_API_KEY"], "sk-legacy-current");
+        });
+    }
+
     fn openclaw_provider(id: &str) -> Provider {
         Provider {
             id: id.to_string(),
@@ -3262,6 +3361,73 @@ impl ProviderService {
         }
 
         sync_current_provider_for_app_to_live(state, &app_type)
+    }
+
+    /// Reproject the current Codex provider immediately before launching an
+    /// external ChatGPT/Codex process. Unlike normal sync, proxy takeover must
+    /// refresh both its backup and its visible local route. API-key providers
+    /// also need their current credential activated after the old app exits.
+    pub fn sync_current_codex_provider_for_external_restart(
+        state: &AppState,
+    ) -> Result<(), AppError> {
+        let app_type = AppType::Codex;
+        let current_id =
+            match crate::settings::get_effective_current_provider(&state.db, &app_type)? {
+                Some(id) => id,
+                None => return Ok(()),
+            };
+
+        let providers = state.db.get_all_providers(app_type.as_str())?;
+        let Some(provider) = providers.get(&current_id) else {
+            return Ok(());
+        };
+
+        let has_live_backup =
+            futures::executor::block_on(state.db.get_live_backup(app_type.as_str()))
+                .ok()
+                .flatten()
+                .is_some();
+        let live_taken_over = state
+            .proxy_service
+            .detect_takeover_in_live_config_for_app(&app_type);
+
+        if has_live_backup || live_taken_over {
+            futures::executor::block_on(
+                state
+                    .proxy_service
+                    .update_live_backup_from_provider(app_type.as_str(), provider),
+            )
+            .map_err(|e| AppError::Message(format!("更新 Codex Live 备份失败: {e}")))?;
+
+            if live_taken_over {
+                futures::executor::block_on(
+                    state
+                        .proxy_service
+                        .sync_codex_live_from_provider_while_proxy_active(provider),
+                )
+                .map_err(|e| AppError::Message(format!("刷新 Codex 代理路由失败: {e}")))?;
+            } else {
+                // A backup without a live placeholder is a partially cleaned-up
+                // takeover. Restore a direct, current provider projection before
+                // starting the external app rather than leaving stale routing.
+                write_live_with_common_config(state.db.as_ref(), &app_type, provider)?;
+            }
+
+            McpService::sync_enabled_for_app(state, &app_type)?;
+        } else {
+            sync_current_provider_for_app_to_live(state, &app_type)?;
+        }
+
+        if let Some(api_key) =
+            crate::codex_config::extract_codex_provider_api_key(&provider.settings_config)
+        {
+            crate::codex_config::write_codex_api_key_auth_for_external_restart(
+                &serde_json::json!({ "OPENAI_API_KEY": api_key }),
+            )?;
+            log::info!("Codex 外部重启已激活当前供应商认证，provider_id={current_id}");
+        }
+
+        Ok(())
     }
 
     pub fn migrate_legacy_common_config_usage(
