@@ -345,7 +345,6 @@ jobs:
               pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
             }
           }
-          }
 
       - name: Build Tauri App (Linux)
         if: runner.os == 'Linux'
