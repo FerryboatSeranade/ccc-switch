@@ -62,6 +62,8 @@ describe("useSettingsForm Hook", () => {
       opencode: false,
       openclaw: false,
       hermes: false,
+      pi: false,
+      grokbuild: false,
     });
     expect(settings.claudeConfigDir).toBe("/Users/demo");
     expect(settings.codexConfigDir).toBeUndefined();
@@ -182,6 +184,7 @@ describe("useSettingsForm Hook", () => {
         enableClaudePluginIntegration: true,
         claudeConfigDir: "  /reset  ",
         codexConfigDir: "   ",
+        piConfigDir: "  /pi-reset  ",
         language: "zh",
       });
     });
@@ -192,6 +195,7 @@ describe("useSettingsForm Hook", () => {
     expect(settings.enableClaudePluginIntegration).toBe(true);
     expect(settings.claudeConfigDir).toBe("/reset");
     expect(settings.codexConfigDir).toBeUndefined();
+    expect(settings.piConfigDir).toBe("/pi-reset");
     expect(settings.language).toBe("zh");
     expect(result.current.initialLanguage).toBe("en");
     expect(changeLanguageSpy).toHaveBeenCalledWith("en");

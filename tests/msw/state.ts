@@ -73,6 +73,7 @@ const createDefaultProviders = (): ProvidersByApp => ({
   opencode: {},
   openclaw: {},
   hermes: {},
+  pi: {},
 });
 
 const createDefaultCurrent = (): CurrentProviderState => ({
@@ -84,6 +85,7 @@ const createDefaultCurrent = (): CurrentProviderState => ({
   opencode: "",
   openclaw: "",
   hermes: "",
+  pi: "",
 });
 
 let providers = createDefaultProviders();
@@ -109,6 +111,7 @@ let settingsState: Settings = {
     opencode: false,
     openclaw: false,
     hermes: false,
+    pi: false,
   },
   claudeConfigDir: "/default/claude",
   codexConfigDir: "/default/codex",
@@ -210,6 +213,7 @@ let mcpConfigs: McpConfigState = {
   opencode: {},
   openclaw: {},
   hermes: {},
+  pi: {},
 };
 
 const cloneProviders = (value: ProvidersByApp) =>
@@ -241,6 +245,7 @@ export const resetProviderState = () => {
       opencode: false,
       openclaw: false,
       hermes: false,
+      pi: false,
     },
     claudeConfigDir: "/default/claude",
     codexConfigDir: "/default/codex",
@@ -292,6 +297,7 @@ export const resetProviderState = () => {
     opencode: {},
     openclaw: {},
     hermes: {},
+    pi: {},
   };
 };
 

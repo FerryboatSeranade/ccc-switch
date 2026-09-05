@@ -1,11 +1,11 @@
-# CCC Switch User Manual
+# CCodex Switch User Manual
 
 > All-in-One Assistant for Claude Code / Claude Desktop / Codex / Gemini CLI / OpenCode / OpenClaw / Hermes
 
 ## Table of Contents
 
 ```
-CCC Switch User Manual
+CCodex Switch User Manual
 │
 ├── 1. Getting Started
 │   ├── 1.1 Introduction
@@ -90,7 +90,7 @@ CCC Switch User Manual
 
 | File | Description |
 |------|-------------|
-| [5.1-config-files.md](./5-faq/5.1-config-files.md) | CCC Switch storage, CLI configuration file formats |
+| [5.1-config-files.md](./5-faq/5.1-config-files.md) | CCodex Switch storage, CLI configuration file formats |
 | [5.2-questions.md](./5-faq/5.2-questions.md) | Frequently asked questions |
 | [5.3-deeplink.md](./5-faq/5.3-deeplink.md) | Deep link protocol, generation and usage |
 | [5.4-env-conflict.md](./5-faq/5.4-env-conflict.md) | Environment variable conflict detection and resolution |
@@ -108,7 +108,7 @@ CCC Switch User Manual
 
 - Documentation version: v3.16.0
 - Last updated: 2026-05-29
-- Applicable to CCC Switch v3.16.0+
+- Applicable to CCodex Switch v3.16.0+
 
 ### v3.16.0 Highlights
 

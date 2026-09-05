@@ -7,6 +7,7 @@ import { ProviderIcon } from "@/components/ProviderIcon";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import type { VisibleApps } from "@/types";
 import type { AppId } from "@/lib/api";
+import { DEFAULT_VISIBLE_APPS } from "@/config/appConfig";
 
 interface AppVisibilitySettingsProps {
   settings: SettingsFormState;
@@ -30,6 +31,7 @@ const APP_CONFIG: Array<{
   { id: "opencode", icon: "opencode", nameKey: "apps.opencode" },
   { id: "openclaw", icon: "openclaw", nameKey: "apps.openclaw" },
   { id: "hermes", icon: "hermes", nameKey: "apps.hermes" },
+  { id: "pi", icon: "pi", nameKey: "apps.pi" },
 ];
 
 export function AppVisibilitySettings({
@@ -38,16 +40,7 @@ export function AppVisibilitySettings({
 }: AppVisibilitySettingsProps) {
   const { t } = useTranslation();
 
-  const visibleApps: VisibleApps = settings.visibleApps ?? {
-    claude: false,
-    "claude-desktop": false,
-    codex: true,
-    gemini: false,
-    grokbuild: false,
-    opencode: false,
-    openclaw: false,
-    hermes: false,
-  };
+  const visibleApps: VisibleApps = settings.visibleApps ?? DEFAULT_VISIBLE_APPS;
 
   // Count how many apps are currently visible
   const visibleCount = Object.values(visibleApps).filter(Boolean).length;

@@ -94,9 +94,8 @@ jobs:
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           corepack enable
-          corepack prepare pnpm@10.12.3 --activate
+          corepack install
           node --version
           pnpm --version
 
@@ -722,22 +721,26 @@ jobs:
           body: |
             ## CodexSwitch ${{ github.ref_name }}
 
-            CodexSwitch release from `FerryboatSeranade/codex-switch`.
-
             Claude Code / Codex / Gemini CLI 供应商切换工具
 
-            ### 下载
+            ## 下载地址
 
-            - **macOS**: `CodexSwitch-${{ github.ref_name }}-macOS.dmg`（推荐）或 `CodexSwitch-${{ github.ref_name }}-macOS.zip`（解压即用）
-            - **Windows (x86_64)**: `CodexSwitch-${{ github.ref_name }}-Windows.msi`（安装版）或 `CodexSwitch-${{ github.ref_name }}-Windows-Portable.zip`（绿色版）
-            - **Windows (ARM64)**: `CodexSwitch-${{ github.ref_name }}-Windows-arm64.msi`（安装版）或 `CodexSwitch-${{ github.ref_name }}-Windows-arm64-Portable.zip`（绿色版）
-            - **Linux (x86_64)**: `CodexSwitch-${{ github.ref_name }}-Linux-x86_64.AppImage` / `.deb` / `.rpm`
-            - **Linux (ARM64)**: `CodexSwitch-${{ github.ref_name }}-Linux-arm64.AppImage` / `.deb` / `.rpm`
+            ### Windows
 
-            > `.tar.gz` 为 Tauri updater 自动更新专用，无需手动下载。
+            - x86_64：[安装版 MSI（推荐）](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-Windows.msi) | [绿色版 Portable ZIP](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-Windows-Portable.zip)
+            - ARM64：[安装版 MSI（推荐）](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-Windows-arm64.msi) | [绿色版 Portable ZIP](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-Windows-arm64-Portable.zip)
 
-            ---
-            如果仓库未配置 Apple 签名与公证 secrets，macOS 构建会以未公证资产发布。
+            ### macOS
+
+            - [DMG 安装包（推荐）](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-macOS.dmg)
+            - [ZIP 免安装包](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-macOS.zip)
+
+            ### Linux
+
+            - x86_64：[AppImage](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-Linux-x86_64.AppImage) | [DEB](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-Linux-x86_64.deb) | [RPM](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-Linux-x86_64.rpm)
+            - ARM64：[AppImage](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-Linux-arm64.AppImage) | [DEB](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-Linux-arm64.deb) | [RPM](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/CodexSwitch-${{ github.ref_name }}-Linux-arm64.rpm)
+
+            > `.tar.gz` 和 `.sig` 是自动更新/签名校验使用的文件，普通用户手动安装不需要下载。
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

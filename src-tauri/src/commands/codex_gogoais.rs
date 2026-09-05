@@ -399,10 +399,7 @@ mod tests {
             }
         });
         assert_eq!(
-            first_string_at(
-                &value,
-                &[&["data", "codex", "name"], &["data", "name"]]
-            ),
+            first_string_at(&value, &[&["data", "codex", "name"], &["data", "name"]]),
             Some("codex-ferryboatseranade".to_string())
         );
         assert_eq!(
