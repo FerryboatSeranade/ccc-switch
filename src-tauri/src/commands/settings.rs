@@ -1660,11 +1660,161 @@ fn windows_powershell_stdout(script: &str) -> Result<String, String> {
     })
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+async fn restart_chatgpt_app_impl(
+    state: &crate::store::AppState,
+) -> Result<CodexAppRestartResult, String> {
+    let state = state.clone();
+    tauri::async_runtime::spawn_blocking(move || restart_chatgpt_or_codex_app_linux(&state))
+        .await
+        .map_err(|e| format!("重启 ChatGPT/Codex App 任务失败: {e}"))?
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 async fn restart_chatgpt_app_impl(
     _state: &crate::store::AppState,
 ) -> Result<CodexAppRestartResult, String> {
     Err("当前平台暂不支持自动重启 ChatGPT/Codex App".to_string())
+}
+
+#[cfg(target_os = "linux")]
+mod linux_desktop;
+
+#[cfg(target_os = "linux")]
+use linux_desktop::{
+    processes as linux_codex_app_processes, DesktopProcess as LinuxCodexAppProcess,
+};
+
+#[cfg(target_os = "linux")]
+fn restart_chatgpt_or_codex_app_linux(
+    state: &crate::store::AppState,
+) -> Result<CodexAppRestartResult, String> {
+    let running = linux_codex_app_processes()?;
+    let was_running = !running.is_empty();
+    let main = running.iter().find(|process| process.is_main);
+    let executable = main
+        .map(|process| process.executable.clone())
+        .or_else(linux_codex_app_executable)
+        .ok_or_else(|| {
+            "未能定位 Linux ChatGPT/Codex App 桌面程序，请先启动应用后重试。".to_string()
+        })?;
+    if executable.to_string_lossy().contains("/.mount_") {
+        return Err("暂不支持自动重启临时挂载的 AppImage，请手动重启应用。".to_string());
+    }
+    let mut command = std::process::Command::new(&executable);
+    if let Some(main) = main {
+        command.args(&main.args);
+        if let Some(cwd) = &main.cwd {
+            command.current_dir(cwd);
+        }
+    }
+
+    if was_running {
+        let mains: Vec<_> = running.iter().filter(|p| p.is_main).cloned().collect();
+        linux_signal_codex_app_processes(&mains, libc::SIGTERM)?;
+        if !linux_wait_for_codex_app_exit(std::time::Duration::from_secs(5))? {
+            linux_signal_codex_app_processes(&linux_codex_app_processes()?, libc::SIGTERM)?;
+            if !linux_wait_for_codex_app_exit(std::time::Duration::from_secs(5))? {
+                linux_signal_codex_app_processes(&linux_codex_app_processes()?, libc::SIGKILL)?;
+            }
+            if !linux_wait_for_codex_app_exit(std::time::Duration::from_secs(5))? {
+                return Err(
+                    "等待 Linux ChatGPT/Codex App 退出超时，请手动关闭应用后重试。".to_string(),
+                );
+            }
+        }
+    }
+
+    sync_current_codex_provider_before_external_launch(state)?;
+    let mut child = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|err| format!("启动 Linux ChatGPT/Codex App 失败: {err}"))?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+
+    if !linux_wait_for_codex_app_start(&executable, std::time::Duration::from_secs(15))? {
+        return Err("等待 Linux ChatGPT/Codex App 启动超时".to_string());
+    }
+
+    Ok(CodexAppRestartResult {
+        was_running,
+        launched: true,
+        app_path: Some(executable.to_string_lossy().to_string()),
+        app_id: None,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_codex_app_executable() -> Option<std::path::PathBuf> {
+    let candidates = [
+        "/usr/lib/chatgpt/ChatGPT",
+        "/usr/lib/codex/Codex",
+        "/opt/ChatGPT/ChatGPT",
+        "/opt/Codex/Codex",
+        "/usr/bin/chatgpt",
+        "/usr/bin/codex",
+        "/opt/ChatGPT/chatgpt",
+        "/opt/Codex/codex",
+    ];
+    candidates
+        .iter()
+        .map(std::path::PathBuf::from)
+        .filter_map(|path| path.canonicalize().ok())
+        .find(|path| linux_desktop::is_desktop_executable(path))
+}
+
+#[cfg(target_os = "linux")]
+fn linux_signal_codex_app_processes(
+    processes: &[LinuxCodexAppProcess],
+    signal: i32,
+) -> Result<(), String> {
+    for process in processes {
+        if !process.is_current() {
+            continue;
+        }
+        let result = unsafe { libc::kill(process.pid as libc::pid_t, signal) };
+        if result != 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) {
+            return Err(format!(
+                "终止 Linux ChatGPT/Codex App 进程失败: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_wait_for_codex_app_exit(timeout: std::time::Duration) -> Result<bool, String> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if linux_codex_app_processes()?.is_empty() {
+            return Ok(true);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    Ok(false)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_wait_for_codex_app_start(
+    executable: &std::path::Path,
+    timeout: std::time::Duration,
+) -> Result<bool, String> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if linux_codex_app_processes()?
+            .iter()
+            .any(|p| p.is_main && p.executable == executable)
+        {
+            return Ok(true);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    Ok(false)
 }
 
 /// 重启 VS Code，令其中的 Codex 扩展重新读取本机配置与认证数据。
