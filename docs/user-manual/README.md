@@ -1,4 +1,4 @@
-# CCodex Switch User Manual / 用户手册 / ユーザーマニュアル
+# Codex Switch User Manual / 用户手册 / ユーザーマニュアル
 
 > Claude Code / Claude Desktop / Codex / Gemini CLI / OpenCode / OpenClaw / Hermes
 
@@ -14,7 +14,7 @@
 
 - Documentation version: v3.16.0
 - Last updated: 2026-05-29
-- Compatible with CCodex Switch v3.16.0+
+- Compatible with Codex Switch v3.16.0+
 
 ## Links
 

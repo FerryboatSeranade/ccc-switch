@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageTabs } from "@/components/ui/page-tabs";
 import {
   Tooltip,
   TooltipContent,
@@ -666,6 +666,7 @@ export function CodexIxQuickSetup({
   const [credentials, setCredentials] = useState<IxSavedCredentials>(() =>
     loadIxSavedCredentials(),
   );
+  const [entryMode, setEntryMode] = useState<"account" | "apiKey">("account");
   const [showPassword, setShowPassword] = useState(false);
   const [credentialsSaveStatus, setCredentialsSaveStatus] = useState<
     "saved" | "saving" | "failed"
@@ -867,13 +868,10 @@ export function CodexIxQuickSetup({
         <KeyRound className="h-4 w-4 text-muted-foreground" />
         IX Codex 快速配置
       </div>
-      <Tabs defaultValue="account" className="space-y-3">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="account">账号密码</TabsTrigger>
-          <TabsTrigger value="apiKey">中转 API Key</TabsTrigger>
-        </TabsList>
+      <div className="space-y-3">
+        <PageTabs aria-label="IX 配置方式" value={entryMode} onValueChange={setEntryMode} items={[{ value: "account", label: "账号密码" }, { value: "apiKey", label: "中转 API Key" }]} />
 
-        <TabsContent value="account" className="mt-0 space-y-2">
+        {entryMode === "account" && <div className="mt-0 space-y-2">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
             <div className="space-y-1.5">
               <Label htmlFor="ix-account">IX 账号</Label>
@@ -966,9 +964,9 @@ export function CodexIxQuickSetup({
             https://code.gogoais.com/v1，并自动启用用量查询。
             {credentialsSaveMessage}
           </p>
-        </TabsContent>
+        </div>}
 
-        <TabsContent value="apiKey" className="mt-0 space-y-2">
+        {entryMode === "apiKey" && <div className="mt-0 space-y-2">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
             <div className="space-y-1.5">
               <Label htmlFor="ix-relay-api-key">中转 API Key</Label>
@@ -1015,8 +1013,8 @@ export function CodexIxQuickSetup({
             使用同一个中转地址 https://code.gogoais.com/v1；保存后会立即切换到
             对应 IX Codex 环境。
           </p>
-        </TabsContent>
-      </Tabs>
+        </div>}
+      </div>
     </div>
   );
 }

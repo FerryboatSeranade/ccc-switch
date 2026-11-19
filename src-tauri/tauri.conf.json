@@ -1,20 +1,25 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "CodexSwitch",
-  "version": "3.20.2",
+  "version": "4.0.35",
   "identifier": "com.cccswitch.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "corepack pnpm@9.15.9 run dev:renderer",
-    "beforeBuildCommand": "corepack pnpm@9.15.9 run build:renderer"
+    "beforeDevCommand": "pnpm run dev:renderer",
+    "beforeBuildCommand": "pnpm run build:renderer"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
         "title": "",
         "titleBarStyle": "Overlay",
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 16
+        },
         "width": 1000,
         "height": 650,
         "minWidth": 900,
@@ -56,7 +61,9 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["cccswitch"]
+        "schemes": [
+          "cccswitch"
+        ]
       }
     },
     "updater": {

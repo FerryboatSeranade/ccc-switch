@@ -28,6 +28,26 @@ afterEach(() => {
 });
 
 describe("useSettingsForm Hook", () => {
+  it("ignores an unsupported cached language sharing the Chinese prefix", () => {
+    useSettingsQueryMock.mockReturnValue({ data: null, isLoading: false });
+    window.localStorage.setItem("language", "zha");
+    (i18n as any).language = "en";
+    const { result } = renderHook(() => useSettingsForm());
+    expect(result.current.readPersistedLanguage()).toBe("en");
+  });
+
+  it.each([
+    ["zh-TW-u-nu-hanidec", "zh-TW"],
+    ["zh-Hant-TW", "zh-TW"],
+    ["zh-hantx", "zh"],
+    ["zh-hkx", "zh"],
+  ])("normalizes the Chinese tag %s to %s", (language, expected) => {
+    useSettingsQueryMock.mockReturnValue({ data: null, isLoading: false });
+    window.localStorage.setItem("language", language);
+    const { result } = renderHook(() => useSettingsForm());
+    expect(result.current.readPersistedLanguage()).toBe(expected);
+  });
+
   it("should normalize settings and sync language on initialization", async () => {
     useSettingsQueryMock.mockReturnValue({
       data: {
@@ -64,6 +84,7 @@ describe("useSettingsForm Hook", () => {
       hermes: false,
       pi: false,
       grokbuild: false,
+      workbuddy: false, copilot: false, omp: false, agy: false, dsh: false, mcode: false, kimi: false,
     });
     expect(settings.claudeConfigDir).toBe("/Users/demo");
     expect(settings.codexConfigDir).toBeUndefined();
@@ -71,6 +92,22 @@ describe("useSettingsForm Hook", () => {
     expect(result.current.initialLanguage).toBe("en");
     expect(changeLanguageSpy).toHaveBeenCalledWith("en");
   });
+
+  it.each(["tr", "ko", "ru", "de"])(
+    "preserves %s from server settings",
+    async (language) => {
+      useSettingsQueryMock.mockReturnValue({
+        data: { language },
+        isLoading: false,
+      });
+      const { result } = renderHook(() => useSettingsForm());
+      await waitFor(() =>
+        expect(result.current.settings?.language).toBe(language),
+      );
+      expect(result.current.initialLanguage).toBe(language);
+      expect(changeLanguageSpy).toHaveBeenCalledWith(language);
+    },
+  );
 
   it("should support japanese language preference from server data", async () => {
     useSettingsQueryMock.mockReturnValue({

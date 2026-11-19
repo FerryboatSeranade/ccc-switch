@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -31,7 +31,9 @@ import type {
 import type { ProviderFormProps, ProviderFormValues } from "./ProviderForm";
 import { BasicFormFields } from "./BasicFormFields";
 import { CodexFormFields } from "./CodexFormFields";
+import { isValidBillingMultiplier } from "./BillingMultiplierField";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
+import { InactiveFieldsPanel } from "./InactiveFieldsPanel";
 import {
   grokBuildOfficialPreset,
   grokBuildProviderPresets,
@@ -51,6 +53,7 @@ import {
   validateGrokBuildConfig,
 } from "@/utils/grokBuildConfig";
 import { resolveProviderIcon } from "@/utils/providerIcon";
+import { useDraftEditorProjection } from "./hooks/useDraftEditorProjection";
 import { GROKBUILD_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
 
 type GrokBuildProviderFormProps = Omit<ProviderFormProps, "appId">;
@@ -76,6 +79,8 @@ export function GrokBuildProviderForm({
   onSubmittingChange,
   initialData,
   showButtons = true,
+  inactiveFields = [],
+  onEditorBaseChange,
 }: GrokBuildProviderFormProps) {
   const { t } = useTranslation();
   const isDarkMode = useDarkMode();
@@ -110,6 +115,22 @@ export function GrokBuildProviderForm({
   const [rawConfig, setRawConfig] = useState(
     initialConfigText ?? buildGrokBuildConfig(initialConfig),
   );
+
+  // 新增：预设或模板投影到当前 config.toml 上显示。每次重置显示内容都要重新投影（或作废
+  // 投影），否则保存时三方比较的底和显示内容对不上。
+  const { projectDraft, clearDraftProjection } = useDraftEditorProjection(
+    "grokbuild",
+    onEditorBaseChange,
+  );
+  const projectGrokDraft = (config: string, presetCategory?: string) =>
+    projectDraft({ config }, presetCategory, (shown) =>
+      setRawConfig(typeof shown.config === "string" ? shown.config : config),
+    );
+  useEffect(() => {
+    if (!initialData) projectGrokDraft(rawConfig);
+    // 只在打开时投影一次：之后的投影跟着预设切换走。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [apiFormat, setApiFormat] = useState<CodexApiFormat>(
     (initialData?.meta?.apiFormat as CodexApiFormat | undefined) ??
       "openai_responses",
@@ -137,6 +158,9 @@ export function GrokBuildProviderForm({
   );
   const [customUserAgent, setCustomUserAgent] = useState(
     initialData?.meta?.customUserAgent ?? "",
+  );
+  const [billingMultiplier, setBillingMultiplier] = useState(
+    initialData?.meta?.billingMultiplier ?? "",
   );
   const [headersOverride, setHeadersOverride] = useState(
     formatRequestOverrideObject(
@@ -176,6 +200,10 @@ export function GrokBuildProviderForm({
   });
   const { isSubmitting } = form.formState;
   const websiteUrl = form.watch("websiteUrl") ?? "";
+  // 「获取 API Key」优先用预设的 apiKeyUrl（带推广参数），与 useApiKeyLink 一致
+  const apiKeyLinkUrl =
+    grokPresetEntries.find((entry) => entry.id === selectedPresetId)?.preset
+      .apiKeyUrl || websiteUrl;
 
   useEffect(() => {
     onSubmittingChange?.(isSubmitting);
@@ -244,6 +272,7 @@ export function GrokBuildProviderForm({
       setPartnerPromotionKey(undefined);
       setPresetEndpoints([]);
       setRawConfig("");
+      clearDraftProjection();
       return;
     }
 
@@ -275,17 +304,17 @@ export function GrokBuildProviderForm({
     setUpstreamModel(presetModel);
     setApiFormat(presetApiFormat);
     setPresetEndpoints(preset.endpointCandidates ?? []);
-    setRawConfig(
-      buildGrokBuildConfig({
-        model: profile,
-        upstreamModel: presetModel,
-        baseUrl: presetBaseUrl,
-        name: presetName,
-        apiKey: presetApiKey,
-        apiBackend: GROK_BUILD_DEFAULT_API_BACKEND,
-        contextWindow: Number.parseInt(contextWindow, 10),
-      }),
-    );
+    const presetConfig = buildGrokBuildConfig({
+      model: profile,
+      upstreamModel: presetModel,
+      baseUrl: presetBaseUrl,
+      name: presetName,
+      apiKey: presetApiKey,
+      apiBackend: GROK_BUILD_DEFAULT_API_BACKEND,
+      contextWindow: Number.parseInt(contextWindow, 10),
+    });
+    setRawConfig(presetConfig);
+    projectGrokDraft(presetConfig, preset.category);
   };
 
   const handleRawConfigChange = (value: string) => {
@@ -372,6 +401,14 @@ export function GrokBuildProviderForm({
       toast.error(requestOverrides.error);
       return;
     }
+    if (!isValidBillingMultiplier(billingMultiplier)) {
+      toast.error(
+        t("providerForm.billingMultiplierInvalid", {
+          defaultValue: "请输入 0 到 1000 的数字，或留空使用 1 倍。",
+        }),
+      );
+      return;
+    }
 
     const customEndpoints = Object.fromEntries(
       draftCustomEndpoints.map((url) => [
@@ -394,6 +431,7 @@ export function GrokBuildProviderForm({
       promptCacheRouting,
       codexChatReasoning,
       customUserAgent: customUserAgent.trim() || undefined,
+      billingMultiplier: billingMultiplier.trim() || undefined,
       localProxyRequestOverrides: requestOverrides.overrides,
       maxOutputTokens:
         Number.isInteger(parsedMaxOutputTokens) && parsedMaxOutputTokens > 0
@@ -425,7 +463,7 @@ export function GrokBuildProviderForm({
       <form
         id="provider-form"
         onSubmit={form.handleSubmit(handleSubmit)}
-        className="space-y-6 glass rounded-xl p-6 border border-white/10"
+        className="space-y-6"
       >
         {!initialData && (
           <ProviderPresetSelector
@@ -450,8 +488,8 @@ export function GrokBuildProviderForm({
                 syncStructuredConfig({ apiKey: value });
               }}
               category={category}
-              shouldShowApiKeyLink={Boolean(websiteUrl)}
-              websiteUrl={websiteUrl}
+              shouldShowApiKeyLink={Boolean(apiKeyLinkUrl)}
+              websiteUrl={apiKeyLinkUrl}
               isPartner={isPartner}
               partnerPromotionKey={partnerPromotionKey}
               shouldShowSpeedTest
@@ -488,6 +526,8 @@ export function GrokBuildProviderForm({
               onPromptCacheRoutingChange={setPromptCacheRouting}
               speedTestEndpoints={speedTestEndpoints}
               customUserAgent={customUserAgent}
+              billingMultiplier={billingMultiplier}
+              onBillingMultiplierChange={setBillingMultiplier}
               onCustomUserAgentChange={setCustomUserAgent}
               localProxyHeadersOverride={headersOverride}
               onLocalProxyHeadersOverrideChange={setHeadersOverride}
@@ -520,6 +560,12 @@ export function GrokBuildProviderForm({
               <FormLabel htmlFor="grokbuild-config-toml">
                 {t("grokBuild.rawConfig", { defaultValue: "config.toml" })}
               </FormLabel>
+              <p className="text-xs text-fg-2">
+                {t("grokBuild.keyFieldsHint", {
+                  defaultValue:
+                    "默认模型（models.default）和它指向的模型表随供应商切换；其余是 Grok Build 全局设置，保存后对所有供应商生效。",
+                })}
+              </p>
               <JsonEditor
                 value={rawConfig}
                 onChange={handleRawConfigChange}
@@ -537,6 +583,19 @@ export function GrokBuildProviderForm({
                   })}
                 </p>
               )}
+              <InactiveFieldsPanel
+                fields={inactiveFields}
+                hint={t("grokBuild.inactiveFieldsHint", {
+                  defaultValue:
+                    "这些是旧版存进卡里的设置，现在切换不会写出去。点一下复制 TOML，需要时粘贴到上方。",
+                })}
+                action={{
+                  kind: "copy",
+                  copiedText: t("grokBuild.inactiveFieldCopied", {
+                    defaultValue: "已复制",
+                  }),
+                }}
+              />
             </div>
           </>
         )}

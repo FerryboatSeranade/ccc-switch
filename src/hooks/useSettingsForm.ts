@@ -1,70 +1,32 @@
+import { DEFAULT_VISIBLE_APPS } from "@/config/appConfig";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsQuery } from "@/lib/query";
-import type { Settings, VisibleApps } from "@/types";
-
-type Language = "zh" | "zh-TW" | "en" | "ja";
+import {
+  DEFAULT_LANGUAGE,
+  isLanguage,
+  isTraditionalChineseTag,
+  normalizeLanguageTag,
+  type Language,
+} from "@/i18n/languages";
+import type { Settings } from "@/types";
+import { sanitizeDirectoryFields } from "@/config/directoryApps";
 
 export type SettingsFormState = Omit<Settings, "language"> & {
   language: Language;
 };
 
-const DEFAULT_VISIBLE_APPS: VisibleApps = {
-  claude: false,
-  "claude-desktop": false,
-  codex: true,
-  gemini: false,
-  grokbuild: false,
-  opencode: false,
-  openclaw: false,
-  hermes: false,
-  pi: false,
-};
-
-const createDefaultVisibleApps = (): VisibleApps => ({
-  ...DEFAULT_VISIBLE_APPS,
-});
-
 const normalizeLanguage = (lang?: string | null): Language => {
-  if (!lang) return "zh";
-  const normalized = lang.toLowerCase().replace(/_/g, "-");
-
-  if (normalized === "zh") {
-    return "zh";
-  }
-
-  if (
-    normalized === "zh-tw" ||
-    normalized.startsWith("zh-hant") ||
-    normalized.startsWith("zh-hk") ||
-    normalized.startsWith("zh-mo")
-  ) {
-    return "zh-TW";
-  }
-
-  if (normalized === "en" || normalized === "ja") {
-    return normalized;
-  }
-
-  if (normalized.startsWith("zh")) {
-    return "zh";
-  }
-
-  return "zh";
+  if (!lang) return DEFAULT_LANGUAGE;
+  const normalized = normalizeLanguageTag(lang);
+  if (isTraditionalChineseTag(normalized)) return "zh-TW";
+  return isLanguage(normalized) ? normalized : DEFAULT_LANGUAGE;
 };
 
 const isSupportedLanguage = (lang?: string | null): boolean => {
   if (!lang) return false;
-  const normalized = lang.toLowerCase().replace(/_/g, "-");
-  return (
-    normalized === "en" || normalized === "ja" || normalized.startsWith("zh")
-  );
-};
-
-const sanitizeDir = (value?: string | null): string | undefined => {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
+  const normalized = normalizeLanguageTag(lang);
+  return isLanguage(normalized) || normalized.startsWith("zh-");
 };
 
 export interface UseSettingsFormResult {
@@ -125,6 +87,7 @@ export function useSettingsForm(): UseSettingsFormResult {
 
     const normalized: SettingsFormState = {
       ...data,
+      visibleApps: data.visibleApps ?? { ...DEFAULT_VISIBLE_APPS },
       showInTray: data.showInTray ?? true,
       minimizeToTrayOnClose: data.minimizeToTrayOnClose ?? true,
       useAppWindowControls: data.useAppWindowControls ?? false,
@@ -136,14 +99,8 @@ export function useSettingsForm(): UseSettingsFormResult {
       preserveCodexOfficialAuthOnSwitch:
         data.preserveCodexOfficialAuthOnSwitch ?? true,
       unifyCodexSessionHistory: data.unifyCodexSessionHistory ?? true,
-      visibleApps: data.visibleApps ?? createDefaultVisibleApps(),
-      claudeConfigDir: sanitizeDir(data.claudeConfigDir),
-      codexConfigDir: sanitizeDir(data.codexConfigDir),
-      geminiConfigDir: sanitizeDir(data.geminiConfigDir),
-      grokConfigDir: sanitizeDir(data.grokConfigDir),
-      opencodeConfigDir: sanitizeDir(data.opencodeConfigDir),
-      openclawConfigDir: sanitizeDir(data.openclawConfigDir),
-      piConfigDir: sanitizeDir(data.piConfigDir),
+      codexStackClassicTools: data.codexStackClassicTools ?? true,
+      ...sanitizeDirectoryFields(data),
       language: normalizedLanguage,
     };
 
@@ -158,15 +115,16 @@ export function useSettingsForm(): UseSettingsFormResult {
         const base =
           prev ??
           ({
+            visibleApps: { ...DEFAULT_VISIBLE_APPS },
+            launchOnStartup: true,
             showInTray: true,
             minimizeToTrayOnClose: true,
             useAppWindowControls: false,
             enableClaudePluginIntegration: true,
-            launchOnStartup: true,
             skipClaudeOnboarding: false,
             preserveCodexOfficialAuthOnSwitch: true,
             unifyCodexSessionHistory: true,
-            visibleApps: createDefaultVisibleApps(),
+            codexStackClassicTools: true,
             language: readPersistedLanguage(),
           } as SettingsFormState);
 
@@ -197,6 +155,7 @@ export function useSettingsForm(): UseSettingsFormResult {
 
       const normalized: SettingsFormState = {
         ...serverData,
+        visibleApps: serverData.visibleApps ?? { ...DEFAULT_VISIBLE_APPS },
         showInTray: serverData.showInTray ?? true,
         minimizeToTrayOnClose: serverData.minimizeToTrayOnClose ?? true,
         useAppWindowControls: serverData.useAppWindowControls ?? false,
@@ -208,14 +167,8 @@ export function useSettingsForm(): UseSettingsFormResult {
         preserveCodexOfficialAuthOnSwitch:
           serverData.preserveCodexOfficialAuthOnSwitch ?? true,
         unifyCodexSessionHistory: serverData.unifyCodexSessionHistory ?? true,
-        visibleApps: serverData.visibleApps ?? createDefaultVisibleApps(),
-        claudeConfigDir: sanitizeDir(serverData.claudeConfigDir),
-        codexConfigDir: sanitizeDir(serverData.codexConfigDir),
-        geminiConfigDir: sanitizeDir(serverData.geminiConfigDir),
-        grokConfigDir: sanitizeDir(serverData.grokConfigDir),
-        opencodeConfigDir: sanitizeDir(serverData.opencodeConfigDir),
-        openclawConfigDir: sanitizeDir(serverData.openclawConfigDir),
-        piConfigDir: sanitizeDir(serverData.piConfigDir),
+        codexStackClassicTools: serverData.codexStackClassicTools ?? true,
+        ...sanitizeDirectoryFields(serverData),
         language: normalizedLanguage,
       };
 

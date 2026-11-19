@@ -39,7 +39,7 @@ Codex Switch 是一个由志愿者维护的开源项目。我们很乐意提供�
 
 ### 提问之前
 
-1. **阅读 [常见问题](https://github.com/FerryboatSeranade/ccc-switch#常见问题)** — 大多数常见问题都已在其中解答。
+1. **阅读 [常见问题](https://github.com/FerryboatSeranade/ccc-switch/blob/main/README_ZH.md#常见问题)** — 大多数常见问题都已在其中解答。
 2. **搜索 [已有的 Issue](https://github.com/FerryboatSeranade/ccc-switch/issues)**（包括已关闭的） — 可能已经有人问过相同的问题。
 
 ### 提问
