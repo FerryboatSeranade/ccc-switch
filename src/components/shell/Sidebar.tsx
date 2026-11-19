@@ -9,6 +9,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Database,
+  Download,
   Folder,
   Globe,
   History,
@@ -95,12 +96,62 @@ export function Sidebar(props: SidebarProps) {
         {t("nav.skipToContent")}
       </a>
       <SidebarTopBar collapsed={collapsed} onToggle={toggle} />
+      {!inSettings && (
+        <SidebarUpdate
+          collapsed={collapsed}
+          onOpen={() => {
+            props.onSelectPage("settings");
+            props.onSelectSettingsSection("about");
+          }}
+        />
+      )}
       {inSettings ? (
         <SettingsDirectory {...props} collapsed={collapsed} />
       ) : (
         <MainDirectory {...props} collapsed={collapsed} />
       )}
     </nav>
+  );
+}
+
+function SidebarUpdate({
+  collapsed,
+  onOpen,
+}: {
+  collapsed: boolean;
+  onOpen: () => void;
+}) {
+  const { t } = useTranslation();
+  const {
+    hasUpdate,
+    updateInfo,
+    readyUpdate,
+    autoUpdateDownloading,
+    isChecking,
+    checkUpdate,
+  } = useUpdate();
+  let label = t("settings.checkForUpdates");
+  if (readyUpdate)
+    label = t("autoUpdate.readyTitle", { version: readyUpdate.version });
+  else if (autoUpdateDownloading) label = t("autoUpdate.downloadingInline");
+  else if (hasUpdate)
+    label = t("settings.updateTo", { version: updateInfo?.availableVersion });
+  else if (isChecking) label = t("settings.checking");
+
+  return (
+    <NavItem
+      collapsed={collapsed}
+      selected={false}
+      icon={Download}
+      label={label}
+      title={label}
+      dot={hasUpdate}
+      dotTone="success"
+      onClick={() => {
+        if (!hasUpdate && !isChecking) void checkUpdate();
+        onOpen();
+      }}
+    />
   );
 }
 
