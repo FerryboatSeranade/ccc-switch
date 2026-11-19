@@ -583,7 +583,7 @@ describe("App integration with MSW", () => {
     const { default: App } = await import("@/App");
     renderApp(App);
 
-    fireEvent.click(sidebarApp("OpenClaw"));
+    fireEvent.click(await waitFor(() => sidebarApp("OpenClaw")));
 
     await waitFor(() =>
       expect(screen.getByTestId("provider-list").textContent).toContain(
@@ -917,7 +917,7 @@ describe("App integration with MSW", () => {
   });
 
   it("warns without blocking when removing Pi's global default provider", async () => {
-    localStorage.setItem("ccc-switch-last-app", "pi");
+    localStorage.setItem("cc-switch-last-app", "pi");
     setProviders("pi", {
       custom: {
         id: "custom",
@@ -986,7 +986,7 @@ describe("App integration with MSW", () => {
     const { default: App } = await import("@/App");
     renderApp(App);
 
-    fireEvent.click(sidebarApp("OpenClaw"));
+    fireEvent.click(await waitFor(() => sidebarApp("OpenClaw")));
 
     await waitFor(() =>
       expect(screen.getByTestId("provider-list").textContent).toContain(
@@ -1023,7 +1023,7 @@ describe("App integration with MSW", () => {
     const { default: App } = await import("@/App");
     renderApp(App);
 
-    fireEvent.click(sidebarApp("OpenClaw"));
+    fireEvent.click(await waitFor(() => sidebarApp("OpenClaw")));
     // 首次启动提示是模态对话框，页面其余部分是 aria-hidden，所以带上 hidden
     const openclawTabs = await screen.findByRole("tablist", {
       name: "OpenClaw",
