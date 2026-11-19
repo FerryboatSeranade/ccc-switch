@@ -535,9 +535,13 @@ mod tests {
                     toml::from_str(&fs::read_to_string(home.join(".codex/config.toml")).unwrap())
                         .unwrap();
                 assert_eq!(
-                    config["model_providers"]["custom"]["experimental_bearer_token"].as_str(),
+                    config["model_providers"]["OpenAI"]["experimental_bearer_token"].as_str(),
                     Some("sk-ix-current")
                 );
+                assert_eq!(config["model_provider"].as_str(), Some("OpenAI"));
+                assert_eq!(config["model"].as_str(), Some("gpt-6.1-sol"));
+                assert_eq!(config["features"]["image_generation"].as_bool(), Some(true));
+                assert_eq!(config["model_providers"]["OpenAI"]["requires_openai_auth"].as_bool(), Some(false));
             }
         });
     }

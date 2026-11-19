@@ -113,6 +113,19 @@ function SidebarTopBar({
 }) {
   const { t } = useTranslation();
   const tipSide = collapsed ? "right" : "left";
+  const { data: version } = useQuery({
+    queryKey: ["app-version"],
+    queryFn: () => getVersion(),
+    staleTime: Infinity,
+  });
+  const brand = (
+    <span className="flex min-w-0 flex-col leading-tight">
+      <span>CodexSwitch</span>
+      {version && (
+        <small className="text-caption font-normal text-fg-3">v{version}</small>
+      )}
+    </span>
+  );
   const label = collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar");
   const Icon = collapsed ? ChevronsRight : ChevronsLeft;
   const toggleButton = (
@@ -151,7 +164,7 @@ function SidebarTopBar({
             className="pointer-events-none h-5 w-5 shrink-0"
           />
           <span className="pointer-events-none me-auto min-w-0 truncate text-strong font-semibold text-fg-1">
-            CodexSwitch
+            {brand}
           </span>
           {toggleButton}
         </div>
@@ -196,7 +209,7 @@ function SidebarTopBar({
             className="h-[22px] w-[22px] shrink-0"
           />
           <span className="truncate text-strong font-semibold text-fg-1">
-            CodexSwitch
+            {brand}
           </span>
         </span>
       )}

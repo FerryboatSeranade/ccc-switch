@@ -723,6 +723,8 @@ jobs:
 
             Claude Code / Codex / Gemini CLI 供应商切换工具
 
+            ${{ github.ref_name == 'v4.0.36' && '本版整合上游 4.0.35。展开侧栏即可在 CodexSwitch 名称下看到当前版本。启用 IX 直连时会使用所选账号的密钥，并配置默认模型、模型目录和图片生成选项。' || '' }}
+
             ## 下载地址
 
             ### Windows

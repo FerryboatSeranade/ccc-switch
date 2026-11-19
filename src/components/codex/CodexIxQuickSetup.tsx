@@ -1,3 +1,4 @@
+import ixCodexTemplate from "@/config/ixCodex.toml?raw";
 import { useCallback, useEffect, useState } from "react";
 import { Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -419,17 +420,9 @@ function buildCodexConfig(baseUrl: string, apiKey: string): string {
   const escapedBaseUrl = escapeTomlBasicString(baseUrl);
   const escapedApiKey = escapeTomlBasicString(apiKey);
 
-  return `model_provider = "custom"
-model = "gpt-5.5"
-model_reasoning_effort = "high"
-disable_response_storage = true
-
-[model_providers.custom]
-name = "GogoAI"
-base_url = "${escapedBaseUrl}"
-wire_api = "responses"
-requires_openai_auth = true
-experimental_bearer_token = "${escapedApiKey}"`;
+  return ixCodexTemplate.replace(/\{baseUrl\}|\{apiKey\}/g, (field) =>
+    field === "{baseUrl}" ? escapedBaseUrl : escapedApiKey,
+  );
 }
 
 function codexOpenaiBaseUrl(raw: string): string {

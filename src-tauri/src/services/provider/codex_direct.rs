@@ -512,6 +512,12 @@ fn row_facts(db: &Database) -> Result<RowFacts, AppError> {
             .and_then(Item::as_str)
             .map(str::trim)
             .filter(|id| !id.is_empty() && *id != ROUTE_ID);
+        if provider.settings_config["__ccSwitchProviderType"] == "ix_gogoai" {
+            facts.retired.push(KnownTable {
+                id: "OpenAI".into(),
+                base_url: "https://code.gogoais.com/v1".into(),
+            });
+        }
         if let Some((id, base_url)) = selector.and_then(|id| Some((id, base_url_of(id)?))) {
             facts.retired.push(KnownTable {
                 id: id.to_string(),
@@ -594,7 +600,7 @@ pub(crate) fn plan(
     let provider = target_provider(target);
     let projection = provider.map(project).transpose()?;
 
-    let (top, mut nested, mut exclusive) = match (&projection, provider) {
+    let (mut top, mut nested, mut exclusive) = match (&projection, provider) {
         (Some(projection), Some(provider)) => (
             projection.top.clone(),
             projection.nested.clone(),
@@ -609,7 +615,7 @@ pub(crate) fn plan(
     // 「暂停使用官方登录」只管代理契约：直连照常。
     let without_login = matches!(target, Target::Proxy { .. })
         && crate::settings::codex_proxy_without_official_login();
-    let (route, stamp, auth) = match (target, &projection) {
+    let (mut route, mut stamp, auth) = match (target, &projection) {
         (Target::Direct(None), _) | (_, None) => (RouteWrite::Default, None, AuthGoal::KeepNative),
         (Target::Direct(Some(provider)), Some(projection)) => {
             let auth = match &managed_login {
@@ -721,6 +727,33 @@ pub(crate) fn plan(
         }
     };
 
+    if let (Target::Direct(Some(ix)), RouteWrite::Custom(table)) = (target, &route) {
+        if ix.settings_config["__ccSwitchProviderType"] == "ix_gogoai"
+            && table.get("base_url").and_then(Item::as_str) == Some("https://code.gogoais.com/v1")
+        {
+            let template = include_str!("../../../../src/config/ixCodex.toml")
+                .parse::<toml_edit::DocumentMut>().expect("valid bundled IX template");
+            for (key, item) in template.iter() {
+                if key != "model_provider" {
+                    if let Some(value) = item.as_value() {
+                        top.retain(|(name, _)| name != key);
+                        exclusive.retain(|(name, _)| name != key);
+                        top.push((key.into(), value.clone()));
+                    }
+                }
+            }
+            for (key, item) in template["features"].as_table().unwrap().iter() {
+                nested.push((vec!["features".into(), key.into()], item.as_value().unwrap().clone()));
+            }
+            let mut relay = table.clone();
+            for key in ["name", "wire_api", "requires_openai_auth", "http_headers"] {
+                relay.insert(key, template["model_providers"]["OpenAI"][key].clone());
+            }
+            relay.insert("model_catalog_url", toml_edit::value("https://code.gogoais.com/v1/models"));
+            route = RouteWrite::BuiltIn { id: "OpenAI".into(), table: Some(relay) };
+            stamp = None;
+        }
+    }
     let stack = match target {
         Target::Proxy { stack, .. } => *stack,
         Target::Direct(_) => &[],
@@ -1071,6 +1104,7 @@ fn contract_of(
     };
     let (selector, table) = match &config.route {
         RouteWrite::Custom(table) => (ROUTE_ID, table_text(table)),
+        RouteWrite::BuiltIn { id, table: Some(table) } => (id.as_str(), table_text(table)),
         RouteWrite::OfficialProxy {
             base_url,
             unified: true,
